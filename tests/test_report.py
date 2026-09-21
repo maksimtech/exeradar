@@ -1,0 +1,217 @@
+"""What report.py has to do with a result once something else has produced it.
+
+Three renderings of one object, and the rule that holds across all of them: a
+renderer reports, it does not decide. Anything it computes — the import
+categories are the only such thing — is derived from what is already in the
+result, never from the file.
+
+The JSON output is the one with a contract. A person reading the console can
+cope with a changed label; a pipeline parsing the JSON cannot, so the shape is
+pinned here rather than left to whatever asdict() happens to produce.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from rich.console import Console
+
+from exeradar import report
+from exeradar.models import (
+    Certificate,
+    ExeResult,
+    Import,
+    Section,
+    Signature,
+    SignatureState,
+    Strings,
+)
+
+
+@pytest.fixture
+def result() -> ExeResult:
+    """A filled-in result, so the renderers are tested on something complete."""
+    return ExeResult(
+        path="C:/tmp/sample.exe",
+        size=106208,
+        sha256="4942b86a",
+        format="PE",
+        arch="AMD64",
+        built="2026-08-05 10:58:33 UTC",
+        sections=[Section(name=".text", virtual_size=1000, raw_size=1024, entropy=6.28)],
+        imports=[
+            Import(dll="WS2_32.dll", functions=["socket", "connect"]),
+            Import(dll="KERNEL32.dll", functions=["CreateProcessW"]),
+        ],
+        strings=Strings(urls=["https://example.com/a"], ips=["10.0.0.1"],
+                        hosts=["example.org"], paths=["C:\\Windows\\Temp"]),
+        signature=Signature(
+            state=SignatureState.EMBEDDED,
+            verified=True,
+            signer="CN=Example",
+            chain=[Certificate(subject="CN=Example", issuer="CN=Example CA",
+                               valid_from="2026-01-01 00:00:00",
+                               valid_to="2027-01-01 00:00:00",
+                               serial="ab", algorithm="sha256", is_ca=False)],
+            timestamp="2026-08-05 11:45:32 UTC",
+            timestamper="CN=Example TSA",
+            detail="embedded SHA_256",
+        ),
+    )
+
+
+# --------------------------------------------------------------------------
+# picking a format from the filename
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name, expected", [
+    ("report.json", "json"),
+    ("REPORT.JSON", "json"),
+    ("notes.md", "markdown"),
+    ("notes.markdown", "markdown"),
+    ("out/deep/path/report.json", "json"),
+])
+def test_the_extension_picks_the_format(name, expected):
+    assert report.format_for(name) == expected
+
+
+@pytest.mark.parametrize("name", ["report.txt", "report", "report.xlsx", "report.json.bak"])
+def test_an_unknown_extension_is_refused_not_guessed(name):
+    """Writing Markdown into a file called .xlsx would be worse than refusing.
+
+    The caller asked for something specific; silently producing something else
+    is the kind of helpfulness that costs an hour to debug.
+    """
+    with pytest.raises(ValueError, match="(?i)extension|format"):
+        report.format_for(name)
+
+
+# --------------------------------------------------------------------------
+# JSON — the output with a contract
+# --------------------------------------------------------------------------
+
+
+def test_json_is_valid_json(result):
+    json.loads(report.to_json(result))
+
+
+def test_json_carries_every_fact_from_the_result(result):
+    data = json.loads(report.to_json(result))
+
+    assert data["path"] == result.path
+    assert data["size"] == result.size
+    assert data["sha256"] == result.sha256
+    assert data["format"] == "PE"
+    assert data["arch"] == "AMD64"
+    assert data["built"] == result.built
+    assert data["sections"][0]["name"] == ".text"
+    assert data["sections"][0]["entropy"] == pytest.approx(6.28)
+    assert data["imports"][0]["dll"] == "WS2_32.dll"
+    assert "socket" in data["imports"][0]["functions"]
+    assert data["strings"]["urls"] == ["https://example.com/a"]
+
+
+def test_the_signature_state_is_a_string_not_an_enum_repr(result):
+    """A consumer matches on "embedded", not on "SignatureState.EMBEDDED"."""
+    data = json.loads(report.to_json(result))
+    assert data["signature"]["state"] == "embedded"
+    assert data["signature"]["verified"] is True
+    assert data["signature"]["chain"][0]["subject"] == "CN=Example"
+
+
+def test_categories_are_derived_and_marked_as_such(result):
+    """The only thing the renderer computes, and it computes it from imports."""
+    data = json.loads(report.to_json(result))
+    assert set(data["categories"]) == {"network", "process"}
+
+
+def test_an_errored_result_still_produces_json(result):
+    broken = ExeResult(path="x", size=0, sha256="", error="unrecognised format")
+    data = json.loads(report.to_json(broken))
+    assert data["error"] == "unrecognised format"
+    assert data["format"] is None
+
+
+def test_json_is_stable_across_calls(result):
+    assert report.to_json(result) == report.to_json(result)
+
+
+# --------------------------------------------------------------------------
+# Markdown
+# --------------------------------------------------------------------------
+
+
+def test_markdown_leads_with_the_file(result):
+    text = report.to_markdown(result)
+    assert text.startswith("# ")
+    assert "sample.exe" in text
+
+
+def test_markdown_states_the_signature_in_words(result):
+    text = report.to_markdown(result)
+    assert "embedded" in text.lower()
+    assert "CN=Example" in text
+    assert result.signature.timestamp in text
+
+
+def test_markdown_does_not_dump_every_imported_function(result):
+    """A ticket wants the shape of the imports, not four hundred names."""
+    text = report.to_markdown(result)
+    assert "WS2_32.dll" in text
+    assert text.count("\n") < 80
+
+
+def test_markdown_says_so_when_there_is_nothing_to_say():
+    empty = ExeResult(path="x.exe", size=1, sha256="aa", format="PE")
+    text = report.to_markdown(empty)
+    assert "none" in text.lower() or "no " in text.lower()
+
+
+# --------------------------------------------------------------------------
+# console
+# --------------------------------------------------------------------------
+
+
+def test_console_prints_the_essentials(result):
+    console = Console(record=True, width=120)
+    report.to_console(result, console=console)
+    text = console.export_text()
+
+    assert "sample.exe" in text
+    assert "AMD64" in text
+    assert "embedded" in text
+    assert "WS2_32.dll" in text
+
+
+def test_console_reports_an_error_without_pretending_to_have_results():
+    broken = ExeResult(path="x.exe", size=0, sha256="", error="unrecognised format")
+    console = Console(record=True, width=120)
+    report.to_console(broken, console=console)
+    text = console.export_text()
+
+    assert "unrecognised format" in text
+    assert "sections" not in text.lower()
+
+
+# --------------------------------------------------------------------------
+# writing to a file
+# --------------------------------------------------------------------------
+
+
+def test_write_produces_the_format_the_name_asks_for(result, tmp_path):
+    target = tmp_path / "out.json"
+    report.write(result, target)
+    assert json.loads(target.read_text(encoding="utf-8"))["format"] == "PE"
+
+
+def test_write_markdown(result, tmp_path):
+    target = tmp_path / "out.md"
+    report.write(result, target)
+    assert target.read_text(encoding="utf-8").startswith("# ")
+
+
+def test_write_refuses_an_unknown_extension(result, tmp_path):
+    with pytest.raises(ValueError):
+        report.write(result, tmp_path / "out.doc")

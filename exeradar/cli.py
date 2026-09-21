@@ -4,13 +4,15 @@ The three commands of ARCHITECTURE.md section 1 are declared here as stubs.
 Declared rather than deferred for two reasons: typer collapses a single command
 into the root, so the help would not show a command name at all, and the shape
 of the interface is a design decision that belongs with the design.
+
+Nothing is rendered here. The interim print that lived in `analyze` while
+report.py was a stub is gone; the command now scans and hands the result to a
+renderer.
 """
 
 from __future__ import annotations
 
 import typer
-
-from exeradar.formats import pe
 
 app = typer.Typer(help="Static analysis of Windows, macOS and Linux executables.")
 
@@ -22,38 +24,28 @@ def analyze(
                                help="Write the report to a file; the extension picks the format"),
 ) -> None:
     """Analyse one executable."""
+    from exeradar import report
     from exeradar.scanner import scan
 
-    result = scan(path)
-    if result.error:
-        typer.secho(f"{result.path}: {result.error}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
-
-    # Interim output. Rendering belongs in report.py, which will take this
-    # result and produce console, JSON and Markdown from it; printing here
-    # keeps the command runnable in the meantime and is meant to be deleted.
-    categories: set[str] = set()
-    for imported in result.imports:
-        categories |= pe.categorise(imported.dll, imported.functions)
-
-    print(f"{result.path}")
-    print(f"  {result.format} {result.arch}, {result.size:,} bytes, built {result.built}")
-    print(f"  sha256      {result.sha256}")
-    print(f"  sections    {len(result.sections)}")
-    print(f"  imports     {len(result.imports)} DLLs, "
-          f"{sum(len(i.functions) for i in result.imports)} functions")
-    print(f"  categories  {', '.join(sorted(categories)) or 'none claimed'}")
-    print(f"  signature   {result.signature.state.value}"
-          f" (verified={result.signature.verified})")
-    if result.signature.signer:
-        print(f"              {result.signature.signer}")
-    if result.signature.timestamp:
-        print(f"              signed {result.signature.timestamp}")
-    print(f"  strings     {len(result.strings.urls)} urls, {len(result.strings.ips)} ips, "
-          f"{len(result.strings.hosts)} hosts, {len(result.strings.paths)} paths")
-
+    # Checked before the scan: refusing a filename after a minute of work
+    # would be a poor trade, and the extension is knowable up front.
     if output:
-        typer.secho("--output needs report.py; not written", fg=typer.colors.YELLOW, err=True)
+        try:
+            report.format_for(output)
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(2) from exc
+
+    result = scan(path)
+
+    if output and not result.error:
+        chosen = report.write(result, output)
+        typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
+    else:
+        report.to_console(result)
+
+    if result.error:
+        raise typer.Exit(1)
 
 
 @app.command()
