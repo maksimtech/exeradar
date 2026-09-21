@@ -62,28 +62,58 @@ _FILE_EXTENSIONS = frozenset({
 })
 
 
-def extract_raw(data: bytes, min_length: int = MIN_LENGTH) -> list[str]:
+def extract_raw(
+    data: bytes,
+    min_length: int = MIN_LENGTH,
+    exclude: Iterable[tuple[int, int]] = (),
+) -> list[str]:
     """Every printable run, ASCII and UTF-16LE, in order of first appearance.
 
     UTF-16LE text is ASCII bytes with NULs between them, so an ASCII-only pass
     turns it into single characters that the minimum length throws away. Both
     passes are needed, and a Windows binary keeps most of its text in the
     second one.
+
+    `exclude` is a list of (start, end) byte ranges to leave out — the
+    signature blob, in practice. The ranges are cut rather than blanked, so a
+    string that straddles a boundary is reported as the part that lies outside
+    and not as the whole: half a string is not the string.
     """
     if min_length < 1:
         raise ValueError("min_length must be at least 1")
 
     found: dict[str, None] = {}
-
     ascii_run = rb"%s{%d,}" % (_PRINTABLE, min_length)
-    for match in re.finditer(ascii_run, data):
-        found[match.group().decode("ascii")] = None
-
     utf16_run = rb"(?:%s\x00){%d,}" % (_PRINTABLE, min_length)
-    for match in re.finditer(utf16_run, data):
-        found[match.group().decode("utf-16-le")] = None
+
+    for chunk in _outside(data, exclude):
+        for match in re.finditer(ascii_run, chunk):
+            found[match.group().decode("ascii")] = None
+        for match in re.finditer(utf16_run, chunk):
+            found[match.group().decode("utf-16-le")] = None
 
     return list(found)
+
+
+def _outside(data: bytes, exclude: Iterable[tuple[int, int]]) -> list[bytes]:
+    """The parts of `data` that no excluded range covers, in order."""
+    ranges = sorted(
+        (max(0, start), min(len(data), end))
+        for start, end in exclude
+        if start < end
+    )
+    if not ranges:
+        return [data]
+
+    chunks: list[bytes] = []
+    cursor = 0
+    for start, end in ranges:
+        if start > cursor:
+            chunks.append(data[cursor:start])
+        cursor = max(cursor, end)
+    if cursor < len(data):
+        chunks.append(data[cursor:])
+    return chunks
 
 
 def classify(candidates: Iterable[str]) -> Strings:
@@ -123,12 +153,20 @@ def classify(candidates: Iterable[str]) -> Strings:
     )
 
 
-def extract(data: bytes, min_length: int = MIN_LENGTH) -> Strings:
-    return classify(extract_raw(data, min_length))
+def extract(
+    data: bytes,
+    min_length: int = MIN_LENGTH,
+    exclude: Iterable[tuple[int, int]] = (),
+) -> Strings:
+    return classify(extract_raw(data, min_length, exclude))
 
 
-def from_file(path: str | Path, min_length: int = MIN_LENGTH) -> Strings:
-    return extract(Path(path).read_bytes(), min_length)
+def from_file(
+    path: str | Path,
+    min_length: int = MIN_LENGTH,
+    exclude: Iterable[tuple[int, int]] = (),
+) -> Strings:
+    return extract(Path(path).read_bytes(), min_length, exclude)
 
 
 def _url_in(text: str) -> str | None:

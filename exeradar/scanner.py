@@ -80,7 +80,10 @@ def scan(path: str | Path) -> ExeResult:
     # The signature and the strings are independent of the format parser and
     # of each other, so neither failing should cost the other its output.
     result.signature = signature.inspect(path)
-    result.strings = strings.from_file(path)
+    # The certificate table is skipped: its URLs and names describe whoever
+    # signed the file, not what the file does, and on a signed binary they
+    # outnumber the program's own by an order of magnitude.
+    result.strings = strings.from_file(path, exclude=signature.signed_regions(path))
     return result
 
 

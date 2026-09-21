@@ -114,3 +114,61 @@ def test_a_recognised_but_unimplemented_format_says_which(tmp_path, magic, name)
     assert result.format == name
     assert result.error and "not supported" in result.error.lower()
     assert result.sha256
+
+
+# --------------------------------------------------------------------------
+# the signature blob is not the program's text
+# --------------------------------------------------------------------------
+
+
+def test_the_signature_region_is_found(signed_pe_path):
+    from exeradar import signature
+
+    regions = signature.signed_regions(signed_pe_path)
+
+    assert regions, "a signed binary has a certificate table"
+    start, end = regions[0]
+    assert 0 < start < end <= signed_pe_path.stat().st_size
+
+
+def test_an_unsigned_file_has_no_regions(tmp_path):
+    from exeradar import signature
+
+    plain = tmp_path / "nothing.exe"
+    plain.write_bytes(b"MZ" + b"\x00" * 128)
+    assert signature.signed_regions(plain) == []
+
+
+def test_no_reported_string_comes_only_from_the_signature(signed_pe_path):
+    """Every URL in the report must exist outside the certificate table.
+
+    Before this, eleven URLs were reported for python.exe and almost all of
+    them were CRL and OCSP endpoints belonging to the Microsoft certificate
+    chain — facts about who signed the file, not about what it does.
+    """
+    from exeradar import signature
+
+    result = scanner.scan(signed_pe_path)
+    data = signed_pe_path.read_bytes()
+    regions = signature.signed_regions(signed_pe_path)
+    outside = bytearray(data)
+    for start, end in regions:
+        outside[start:end] = b"\x00" * (end - start)
+    outside = bytes(outside)
+
+    for url in result.strings.urls:
+        assert url.encode("ascii", "ignore") in outside or \
+               url.encode("utf-16-le") in outside, f"{url} exists only inside the signature"
+
+
+def test_excluding_the_signature_drops_the_certificate_urls(signed_pe_path):
+    """The whole point, measured: fewer URLs, and no CRL endpoints left."""
+    from exeradar import signature, strings as strings_module
+
+    everything = strings_module.from_file(signed_pe_path)
+    filtered = strings_module.from_file(
+        signed_pe_path, exclude=signature.signed_regions(signed_pe_path)
+    )
+
+    assert len(filtered.urls) < len(everything.urls)
+    assert not [u for u in filtered.urls if "/crl/" in u.lower()]

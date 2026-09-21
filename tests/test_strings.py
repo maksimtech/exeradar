@@ -213,3 +213,38 @@ def test_two_tiny_labels_are_noise_not_a_domain(text):
     trade worth making when the alternative is a report full of debris.
     """
     assert text not in strings.classify([text]).hosts
+
+
+# --------------------------------------------------------------------------
+# excluding regions — the signature blob is not the program's text
+# --------------------------------------------------------------------------
+
+
+def test_an_excluded_region_contributes_nothing():
+    data = b"\x00keepthisone\x00" + b"\x00dropthisone\x00"
+    start = data.index(b"dropthisone")
+    found = strings.extract_raw(data, exclude=[(start, start + len(b"dropthisone"))])
+    assert "keepthisone" in found
+    assert "dropthisone" not in found
+
+
+def test_a_string_straddling_the_boundary_is_not_reported_whole():
+    """Half a string is not the string. Cutting at the boundary is the point."""
+    data = b"\x00" + b"aaaaBBBB" + b"\x00"
+    start = data.index(b"BBBB")
+    found = strings.extract_raw(data, exclude=[(start, start + 4)])
+    assert "aaaaBBBB" not in found
+    assert "aaaa" in found
+
+
+def test_several_regions_can_be_excluded():
+    data = b"\x00first\x00second\x00third\x00"
+    regions = [(data.index(b"first"), data.index(b"first") + 5),
+               (data.index(b"third"), data.index(b"third") + 5)]
+    found = strings.extract_raw(data, exclude=regions)
+    assert found == ["second"]
+
+
+def test_no_regions_behaves_as_before():
+    data = b"\x00hello there\x00"
+    assert strings.extract_raw(data) == strings.extract_raw(data, exclude=[])

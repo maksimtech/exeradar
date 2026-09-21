@@ -29,6 +29,39 @@ def catalog_available() -> bool:
     return sys.platform == "win32"
 
 
+def signed_regions(path: str | Path) -> list[tuple[int, int]]:
+    """The byte ranges the signature occupies, as (start, end) file offsets.
+
+    Everything in there belongs to whoever signed the file, not to the program:
+    certificate subjects, CRL distribution points, OCSP responders. Reporting
+    those as the binary's URLs answers a question nobody asked — on the test
+    fixture it was almost every URL found.
+
+    The certificate table is the one PE data directory whose first field is a
+    file offset rather than an RVA, which is what makes this cheap to do.
+    """
+    path = Path(path)
+    try:
+        binary = lief.PE.parse(str(path))
+    except Exception:  # noqa: BLE001 - nothing to exclude in a file we cannot read
+        return []
+    if binary is None:
+        return []
+
+    size = path.stat().st_size
+    regions: list[tuple[int, int]] = []
+    for directory in binary.data_directories:
+        if "CERTIFICATE" not in str(directory.type).upper():
+            continue
+        if not directory.size:
+            continue
+        start = min(directory.rva, size)
+        end = min(directory.rva + directory.size, size)
+        if start < end:
+            regions.append((start, end))
+    return regions
+
+
 def inspect(path: str | Path) -> Signature:
     path = Path(path)
 
