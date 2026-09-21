@@ -27,6 +27,19 @@ jobs:
         with:
           python-version: "3.13"
 
+      # hatchling reads the version from exeradar/__init__.py, so a tag that
+      # disagrees with it publishes a release under the wrong number and there
+      # is no taking a version back off PyPI. Checked before anything is built.
+      # __init__.py holds nothing but the version string, so this import needs
+      # none of the package's dependencies.
+      - name: Check the tag matches the package version
+        run: |
+          VERSION=$(python -c "from exeradar import __version__; print(__version__)")
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package version $VERSION"
+            exit 1
+          fi
+
       - name: Install build dependencies
         run: pip install --upgrade build hatchling  # NOSONAR - trusted packages
 
