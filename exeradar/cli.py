@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import typer
 
+from exeradar.formats import pe
+
 app = typer.Typer(help="Static analysis of Windows, macOS and Linux executables.")
 
 
@@ -20,7 +22,38 @@ def analyze(
                                help="Write the report to a file; the extension picks the format"),
 ) -> None:
     """Analyse one executable."""
-    raise NotImplementedError
+    from exeradar.scanner import scan
+
+    result = scan(path)
+    if result.error:
+        typer.secho(f"{result.path}: {result.error}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+    # Interim output. Rendering belongs in report.py, which will take this
+    # result and produce console, JSON and Markdown from it; printing here
+    # keeps the command runnable in the meantime and is meant to be deleted.
+    categories: set[str] = set()
+    for imported in result.imports:
+        categories |= pe.categorise(imported.dll, imported.functions)
+
+    print(f"{result.path}")
+    print(f"  {result.format} {result.arch}, {result.size:,} bytes, built {result.built}")
+    print(f"  sha256      {result.sha256}")
+    print(f"  sections    {len(result.sections)}")
+    print(f"  imports     {len(result.imports)} DLLs, "
+          f"{sum(len(i.functions) for i in result.imports)} functions")
+    print(f"  categories  {', '.join(sorted(categories)) or 'none claimed'}")
+    print(f"  signature   {result.signature.state.value}"
+          f" (verified={result.signature.verified})")
+    if result.signature.signer:
+        print(f"              {result.signature.signer}")
+    if result.signature.timestamp:
+        print(f"              signed {result.signature.timestamp}")
+    print(f"  strings     {len(result.strings.urls)} urls, {len(result.strings.ips)} ips, "
+          f"{len(result.strings.hosts)} hosts, {len(result.strings.paths)} paths")
+
+    if output:
+        typer.secho("--output needs report.py; not written", fg=typer.colors.YELLOW, err=True)
 
 
 @app.command()
