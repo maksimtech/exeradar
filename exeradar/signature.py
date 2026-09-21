@@ -69,7 +69,11 @@ def _embedded(path: Path) -> Signature | None:
 
     signature = binary.signatures[0]
     chain = _chain(signature)
-    stamp, stamper = _timestamp(path)
+    stamp, stamper, problem = _timestamp(path)
+
+    detail = f"embedded {signature.digest_algorithm}".replace("ALGORITHMS.", "")
+    if problem:
+        detail = f"{detail}; timestamp not read: {problem}"
 
     return Signature(
         state=SignatureState.EMBEDDED,
@@ -78,7 +82,7 @@ def _embedded(path: Path) -> Signature | None:
         chain=chain,
         timestamp=stamp,
         timestamper=stamper,
-        detail=f"embedded {signature.digest_algorithm}".replace("ALGORITHMS.", ""),
+        detail=detail,
     )
 
 
@@ -113,13 +117,18 @@ def _cert_date(value) -> str | None:
     return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
 
-def _timestamp(path: Path) -> tuple[str | None, str | None]:
+def _timestamp(path: Path) -> tuple[str | None, str | None, str | None]:
     """The one job signify is a dependency for.
 
     LIEF exposes the RFC3161 countersignature as a structure but does not
     decode the TSTInfo inside it, so the time the file was signed is not
     reachable through LIEF alone. Without it a countersignature proves nothing,
     which matters most for a certificate that has since expired.
+
+    Returns the reason as a third value rather than swallowing it. A timestamp
+    that is missing because the token was absent and one that is missing
+    because the decoder raised look identical from the outside, and only one of
+    them is a fact about the file.
     """
     try:
         from signify.authenticode import AuthenticodeFile
@@ -134,10 +143,11 @@ def _timestamp(path: Path) -> tuple[str | None, str | None]:
                 return (
                     f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
                     _timestamper(counter),
+                    None if when else "the token carried no signing time",
                 )
-    except Exception:  # noqa: BLE001 - a missing timestamp is not a failure
-        return None, None
-    return None, None
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return None, None, f"{type(exc).__name__}: {exc}"
+    return None, None, None
 
 
 def _timestamper(counter) -> str | None:

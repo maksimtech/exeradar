@@ -111,8 +111,10 @@ def test_the_timestamp_is_extracted_when_there_is_one(signed_pe_path):
         pytest.skip("this sample carries no countersignature")
 
     result = signature.inspect(signed_pe_path)
-    assert result.timestamp, "the token was found but its date was not decoded"
-    assert result.timestamper, "the token was found but the authority was not named"
+    # detail carries the reason when the decode failed, so a failure here says
+    # what went wrong instead of only that something did.
+    assert result.timestamp, f"the token was found but its date was not decoded: {result.detail}"
+    assert result.timestamper, f"the token was found but the authority was not named: {result.detail}"
 
 
 def test_a_signature_outlives_its_certificate(signed_pe_path):
