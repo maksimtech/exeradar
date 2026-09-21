@@ -11,6 +11,14 @@ and declined by name — not mistaken for an unknown format.
 The design is written down first, in [ARCHITECTURE.md](ARCHITECTURE.md), and
 the part worth reading is section 3.
 
+## Install
+
+```
+pip install exeradar
+```
+
+Python 3.11 or later.
+
 ## Why section 3
 
 A spike against Windows' own `notepad.exe` found that LIEF reports zero
@@ -32,15 +40,112 @@ exeradar batch DIR   [--output report.json|report.md]
 exeradar verify FILE
 ```
 
-`analyze` prints one file in full; `--output` picks its format from the
-extension and refuses one it does not know rather than guessing.
+### `analyze` — one binary in full
 
-`batch` walks a directory recursively, analyses every PE it finds and prints a
-row per file. With `--output` it writes the whole run: a JSON array, or one
-Markdown section per file.
+```
+$ exeradar analyze python.exe
 
-`verify` reads the signature and nothing else — no hashing, no imports, no
-strings — and is meant to be a gate in a script:
+python.exe
+  PE AMD64, 106,208 bytes, built 2026-08-05 10:58:33 UTC
+  sha256 4942b86a6597e5aee0128daa00050ed79bc21f6e709a78eb19cbfeb0c2f39ac9
+
+Signature embedded
+  Embedded Authenticode signature, valid.
+  signer     C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
+  signed     2026-08-05 11:45:32 UTC
+
+Imports 8 libraries, 44 functions — no category claimed
+  api-ms-win-crt-runtime-l1-1-0.dll    18
+  KERNEL32.dll                         15
+  VCRUNTIME140.dll                      5
+  api-ms-win-crt-stdio-l1-1-0.dll       2
+  python314.dll                         1
+  api-ms-win-crt-math-l1-1-0.dll        1
+  api-ms-win-crt-locale-l1-1-0.dll      1
+  api-ms-win-crt-heap-l1-1-0.dll        1
+
+Strings 1 urls, 0 ips, 0 hosts, 1 paths
+  url   http://schemas.microsoft.com/SMI/2016/WindowsSettings
+  path  D:\a\1\b\bin\amd64\python.pdb
+
+ section  virtual  raw     entropy
+ .text    3,628    4,096   6.00
+ .rdata   3,942    4,096   4.27
+ .data    1,664    512     0.53
+ .pdata   348      512     3.77
+ .rsrc    80,928   81,408  6.17
+ .reloc   48       512     3.90
+```
+
+Three things in that output are the tool refusing to overclaim.
+
+**"no category claimed"** — `KERNEL32.dll` imports 15 functions and the
+categoriser says nothing about them, because a library that every binary loads
+tells you nothing about what this one does. Categories are decided from the
+imported functions, not from the library name.
+
+**One URL, not eleven** — the certificate table is excluded from string
+extraction. Everything in there belongs to whoever signed the file: on this
+binary it was ten Microsoft CRL and OCSP endpoints, which describe the signer
+and not the program.
+
+**And that one URL is not a finding.** `http://schemas.microsoft.com/...` is an
+XML namespace out of the PE manifest, not an endpoint the program contacts. A
+"plaintext endpoint" finding would fire on every Windows binary with a
+manifest, so there isn't one.
+
+`--output` picks its format from the extension, `.json` or `.md`, and refuses an
+extension it does not know rather than guessing. The name is checked before the
+scan starts, so a rejected filename never costs the work.
+
+### `batch` — a directory
+
+Walks recursively and analyses every PE, chosen by magic bytes and not by
+extension, sorted by path so two runs stay comparable.
+
+```
+$ exeradar batch ./downloads
+
+ file          sha256        signature  findings
+ clean.exe     4942b86a6597  embedded   0
+ nested.exe    4942b86a6597  embedded   0
+ tampered.exe  ec7e1e10899c  embedded   1
+
+3 files, 2 signed and verified, 1 with findings
+```
+
+With `--output` it writes the whole run: a JSON array, or one Markdown section
+per file.
+
+### `verify` — a gate for a script
+
+Reads the signature and nothing else: no hashing, no imports, no strings, so it
+stays fast on a large binary.
+
+```
+$ exeradar verify python.exe
+embedded
+Embedded Authenticode signature, valid.
+signer    C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
+signed    2026-08-05 11:45:32 UTC
+$ echo $?
+0
+```
+
+Change one byte in the code section and the signature still parses, still names
+its signer, and no longer describes the file:
+
+```
+$ exeradar verify tampered.exe
+embedded
+Embedded Authenticode signature, present but not valid.
+signer    C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
+signed    2026-08-05 11:45:32 UTC
+$ echo $?
+1
+```
+
+The exit code carries the answer:
 
 | Exit | Meaning |
 | --- | --- |
