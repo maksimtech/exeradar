@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
   security-events: write
+  # Private repositories only: the CodeQL action reads the workflow run through
+  # the API to attach the results, and without this it fails with "Resource not
+  # accessible by integration". Public repositories do not need it.
+  actions: read
 jobs:
   analyze:
     # Named for the check context: the ruleset requires a name, and a job name
