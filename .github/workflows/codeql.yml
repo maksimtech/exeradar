@@ -1,5 +1,10 @@
 name: CodeQL
 on:
+  # Code scanning depends on repository settings as much as on the code, so
+  # being able to re-run it without an empty commit is worth two lines. The
+  # first run here failed because the repository was private and code scanning
+  # was unavailable; nothing in the code had changed when it started passing.
+  workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
