@@ -26,6 +26,11 @@ below rather than left to the reader:
 - it binds **manufacturers placing a product on the market** (article 2(1)).
   ExeRadar reads one file; whether that file is part of such a product is not
   something a PE header can answer, so that too is a note and not an assumption.
+
+Two languages meet in this module, along a seam worth keeping straight. The
+evidence of a finding describes the binary and is English, like the rest of the
+tool and like the JSON it ends up in. The titles, the notes and the citations
+are the legal report and are Italian, like the other four Radars.
 """
 from __future__ import annotations
 
@@ -37,7 +42,7 @@ from typing import Optional
 from exeradar import law_fetcher
 from exeradar.law_cache import LawCache
 from exeradar.law_fetcher import CRA, GDPR, NIS2, Act, LawFetchError
-from exeradar.models import ExeResult, SignatureState
+from exeradar.models import ExeResult, Finding, SignatureState
 
 # ─── Mapping: ExeRadar findings → provisions ──────────────────────────────────
 
@@ -161,13 +166,13 @@ def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[st
 
     if signature.state is SignatureState.UNSIGNED:
         found["unsigned"] = [
-            signature.detail or "nessuna firma incorporata e nessuna voce di catalogo"
+            signature.detail or "no embedded signature and no catalog entry"
         ]
     elif signature.state is SignatureState.EMBEDDED:
         if signature.verified is False:
             found["signature_invalid"] = [
-                "firma incorporata presente ma non valida; firmatario dichiarato: "
-                f"{signature.signer or 'non dichiarato'}"
+                "embedded signature present but not valid; declared signer: "
+                f"{signature.signer or 'none stated'}"
             ]
         else:
             leaf = signature.chain[0] if signature.chain else None
@@ -177,7 +182,7 @@ def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[st
             # which is why LIEF still verifies this repository's own fixture.
             if expiry is not None and expiry < now and not signature.timestamp:
                 found["certificate_expired"] = [
-                    f"{leaf.subject} scaduto il {leaf.valid_to}, senza controfirma RFC3161"
+                    f"{leaf.subject} expired on {leaf.valid_to}, with no RFC3161 countersignature"
                 ]
 
     addresses = [ip for ip in result.strings.ips if not _is_local(ip)]
@@ -185,6 +190,28 @@ def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[st
         found["hardcoded_ip"] = addresses
 
     return found
+
+
+# How much the evidence proves, which is not how much it costs. ExeRadar sees
+# a file and never the system it runs on, so it cannot rank risk. An embedded
+# signature that does not verify is the strongest statement available — the
+# bytes are not the bytes that were signed — while a dotted quad that may well
+# be a version number is the weakest.
+SEVERITY = {
+    "signature_invalid": "high",
+    "unsigned": "medium",
+    "certificate_expired": "medium",
+    "hardcoded_ip": "low",
+    "known_vulnerabilities": "high",
+}
+
+
+def findings_for(result: ExeResult, *, now: Optional[datetime] = None) -> list[Finding]:
+    """The same findings as `findings_of`, as the objects the model carries."""
+    return [
+        Finding(id=name, severity=SEVERITY[name], evidence="; ".join(evidence))
+        for name, evidence in findings_of(result, now=now).items()
+    ]
 
 
 def notes_of(result: ExeResult, *, now: Optional[datetime] = None) -> list[str]:

@@ -21,6 +21,7 @@ from exeradar import report
 from exeradar.models import (
     Certificate,
     ExeResult,
+    Finding,
     Import,
     Section,
     Signature,
@@ -215,3 +216,102 @@ def test_write_markdown(result, tmp_path):
 def test_write_refuses_an_unknown_extension(result, tmp_path):
     with pytest.raises(ValueError):
         report.write(result, tmp_path / "out.doc")
+
+
+# --------------------------------------------------------------------------
+# many results at once — what `batch` renders
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def results(result) -> list[ExeResult]:
+    """Three files: one clean, one with findings, one that could not be read."""
+    unsigned = ExeResult(
+        path="C:/tmp/other.exe", size=2048, sha256="ff0011223344556677",
+        format="PE", arch="i386",
+        signature=Signature(state=SignatureState.UNSIGNED, verified=False,
+                            detail="no embedded signature and no catalog entry"),
+        findings=[Finding(id="unsigned", severity="medium", evidence="no signature")],
+    )
+    broken = ExeResult(path="C:/tmp/notes.txt", size=10, sha256="aabb",
+                       error="unrecognised format")
+    return [result, unsigned, broken]
+
+
+def test_json_for_many_is_an_array_of_the_same_objects(results):
+    data = json.loads(report.to_json_many(results))
+
+    assert isinstance(data, list)
+    assert len(data) == 3
+    assert data[0] == json.loads(report.to_json(results[0]))
+    assert data[2]["error"] == "unrecognised format"
+
+
+def test_markdown_for_many_keeps_one_section_per_file(results):
+    text = report.to_markdown_many(results)
+
+    assert text.count("\n# ") + text.startswith("# ") == 3
+    assert "sample.exe" in text
+    assert "other.exe" in text
+    assert "unrecognised format" in text
+
+
+def test_the_table_has_a_row_per_file(results):
+    console = Console(record=True, width=120)
+    report.to_console_many(results, console=console)
+    text = console.export_text()
+
+    assert "sample.exe" in text
+    assert "other.exe" in text
+    assert "notes.txt" in text
+
+
+def test_the_table_shortens_the_hash_without_inventing_one(results):
+    console = Console(record=True, width=120)
+    report.to_console_many(results, console=console)
+    text = console.export_text()
+
+    assert results[1].sha256[:12] in text
+    assert results[1].sha256 not in text
+
+
+def test_the_table_states_the_signature_and_counts_the_findings(results):
+    console = Console(record=True, width=120)
+    report.to_console_many(results, console=console)
+    text = console.export_text()
+
+    assert "embedded" in text
+    assert "unsigned" in text
+
+
+def test_a_file_that_could_not_be_read_is_shown_and_not_dropped(results):
+    """A batch that silently skips what it could not open is a batch that lies."""
+    console = Console(record=True, width=120)
+    report.to_console_many(results, console=console)
+    text = console.export_text()
+
+    assert "notes.txt" in text
+    assert "unrecognised" in text or "error" in text.lower()
+
+
+def test_the_table_survives_an_empty_run():
+    console = Console(record=True, width=120)
+    report.to_console_many([], console=console)
+    assert console.export_text().strip()
+
+
+def test_write_many_produces_an_array(results, tmp_path):
+    target = tmp_path / "out.json"
+    assert report.write_many(results, target) == "json"
+    assert len(json.loads(target.read_text(encoding="utf-8"))) == 3
+
+
+def test_write_many_markdown(results, tmp_path):
+    target = tmp_path / "out.md"
+    assert report.write_many(results, target) == "markdown"
+    assert target.read_text(encoding="utf-8").startswith("# ")
+
+
+def test_write_many_refuses_an_unknown_extension(results, tmp_path):
+    with pytest.raises(ValueError):
+        report.write_many(results, tmp_path / "out.doc")

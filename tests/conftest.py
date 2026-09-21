@@ -1,21 +1,22 @@
 """Where the test binaries come from.
 
-No executable is committed to this repository. notepad++.exe was the obvious
-candidate and is 8.1 MB of GPL code, which does not belong in an MIT repository
-and would sit in the git history for ever. The other obvious candidates are
-Windows system binaries, which are not redistributable either.
+One executable is committed: `tests/fixtures/python.exe`, 104 KB under the PSF
+licence, which names redistribution explicitly — see ATTRIBUTIONS.md for why
+that one and not notepad++.exe (8.1 MB, GPL, wrong licence for an MIT
+repository) or a Windows system binary (not redistributable at all).
 
-So the fixtures resolve a binary in this order:
+The fixtures still resolve a binary in order, because the committed sample
+cannot cover every case:
 
-1. anything dropped in tests/fixtures/ — gitignored, so a developer can put a
-   local sample there and the whole suite runs against it;
+1. anything in tests/fixtures/, the committed sample included, so a developer
+   can drop a local one beside it and the suite runs against that too;
 2. a Windows system binary, when running on Windows;
 3. skip, with a reason that says which of the two was missing.
 
-The consequence, stated plainly: on the Linux CI runners the PE tests skip.
-What runs everywhere is everything that does not need a binary — the DLL
-categoriser, the entropy maths — and that is where the decisions live. The
-parsing itself is LIEF's job, and LIEF has its own test suite.
+Only `catalog_pe_path` reaches step 3 on the CI runners: a catalog signature
+is a Windows concept and there is nothing to substitute for it elsewhere.
+That is the one thing about this tool that Linux cannot check, which is also
+exactly why `SignatureState.UNKNOWN` exists.
 """
 
 from __future__ import annotations

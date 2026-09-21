@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from exeradar import law_fetcher
+from exeradar import law_checker, law_fetcher
 from exeradar.law_cache import LawCache
 from exeradar.law_checker import (
     CRA_APPLICATION_NOTE,
@@ -400,3 +400,27 @@ def test_an_article_citation_still_says_article(cache, online):
     article = next(c for c in outcome.citations if c.article == "13(1)")
 
     assert "art. 13(1)" in format_citation(article)
+
+
+# --------------------------------------------------------------------------
+# findings as the objects the model carries
+# --------------------------------------------------------------------------
+
+
+def test_every_finding_has_a_severity():
+    assert set(law_checker.SEVERITY) == set(FINDING_ARTICLES)
+
+
+def test_findings_for_builds_the_model_objects():
+    found = law_checker.findings_for(
+        result(state=SignatureState.UNSIGNED, verified=False, ips=["203.0.113.7"]),
+        now=NOW,
+    )
+
+    assert [f.id for f in found] == ["unsigned", "hardcoded_ip"]
+    assert [f.severity for f in found] == ["medium", "low"]
+    assert all(f.evidence for f in found)
+
+
+def test_a_clean_file_carries_no_finding_objects():
+    assert law_checker.findings_for(result(), now=NOW) == []

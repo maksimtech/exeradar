@@ -47,6 +47,21 @@ def detect_format(head: bytes) -> str | None:
     return None
 
 
+def format_of(path: str | Path) -> str | None:
+    """The format of a file on disk, without reading the rest of it.
+
+    What `batch` walks a directory with: a folder holds far more files than
+    executables, and opening eight bytes is the cheapest way to tell which is
+    which. A file that cannot be opened is not a format this tool declines —
+    it is nothing at all, so None covers both.
+    """
+    try:
+        with Path(path).open("rb") as handle:
+            return detect_format(handle.read(_MAGIC_LENGTH))
+    except OSError:
+        return None
+
+
 def scan(path: str | Path) -> ExeResult:
     path = Path(path)
 
@@ -84,6 +99,13 @@ def scan(path: str | Path) -> ExeResult:
     # signed the file, not what the file does, and on a signed binary they
     # outnumber the program's own by an order of magnitude.
     result.strings = strings.from_file(path, exclude=signature.signed_regions(path))
+
+    # Last, because every finding is drawn from the facts above. Imported here
+    # rather than at the top so that reading a file does not pull in the law
+    # machinery and its HTTP client; nothing in this call touches the network.
+    from exeradar import law_checker
+
+    result.findings = law_checker.findings_for(result)
     return result
 
 

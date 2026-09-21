@@ -13,6 +13,7 @@ the current field names.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable, Sequence
 from dataclasses import asdict
 from pathlib import Path
 
@@ -20,7 +21,7 @@ from rich.console import Console
 from rich.table import Table
 
 from exeradar.formats import pe
-from exeradar.models import ExeResult
+from exeradar.models import ExeResult, Signature
 
 _EXTENSIONS = {
     ".json": "json",
@@ -31,6 +32,10 @@ _EXTENSIONS = {
 # Imports worth naming in a summary: the ones a category was claimed for, plus
 # enough of the rest to show the shape.
 _IMPORTS_SHOWN = 8
+
+# Enough of a digest to tell two files apart at a glance and to paste into a
+# search; the whole thing is in the JSON, where something will read it.
+_HASH_SHOWN = 12
 
 
 def format_for(path: str | Path) -> str:
@@ -54,12 +59,22 @@ def categories_of(result: ExeResult) -> list[str]:
     return sorted(found)
 
 
-def to_json(result: ExeResult) -> str:
+def _as_data(result: ExeResult) -> dict:
     data = asdict(result)
     data["signature"]["state"] = result.signature.state.value
     # Derived, not measured: everything else here came out of the file.
     data["categories"] = categories_of(result)
-    return json.dumps(data, indent=2, ensure_ascii=False, sort_keys=False)
+    return data
+
+
+def to_json(result: ExeResult) -> str:
+    return json.dumps(_as_data(result), indent=2, ensure_ascii=False, sort_keys=False)
+
+
+def to_json_many(results: Iterable[ExeResult]) -> str:
+    """One array, same objects. A consumer parses one shape, not two."""
+    return json.dumps([_as_data(r) for r in results], indent=2,
+                      ensure_ascii=False, sort_keys=False)
 
 
 def to_markdown(result: ExeResult) -> str:
@@ -78,7 +93,7 @@ def to_markdown(result: ExeResult) -> str:
         "",
         "## Signature",
         "",
-        _signature_sentence(result),
+        signature_sentence(result.signature),
         "",
     ]
 
@@ -159,7 +174,7 @@ def to_console(result: ExeResult, console: Console | None = None) -> None:
     colour = {"embedded": "green", "catalog": "green",
               "unsigned": "red", "unknown": "yellow"}[signature.state.value]
     console.print(f"[bold]Signature[/bold] [{colour}]{signature.state.value}[/{colour}]")
-    console.print(f"  {_signature_sentence(result)}")
+    console.print(f"  {signature_sentence(result.signature)}")
     if signature.signer:
         console.print(f"  signer     {signature.signer}")
     if signature.timestamp:
@@ -205,6 +220,51 @@ def to_console(result: ExeResult, console: Console | None = None) -> None:
         console.print(table)
 
 
+def to_markdown_many(results: Iterable[ExeResult]) -> str:
+    return "\n".join(to_markdown(result) for result in results)
+
+
+def to_console_many(results: Sequence[ExeResult], console: Console | None = None) -> None:
+    """One row per file: the summary `batch` exists to produce.
+
+    A file that could not be parsed keeps its row and shows why. Dropping it
+    would make the count agree with nothing, and the question a batch answers
+    is "what is in this directory", not "what went well".
+    """
+    console = console or Console()
+
+    if not results:
+        console.print("[dim]no PE files found[/dim]")
+        return
+
+    table = Table("file", "sha256", "signature", "findings", box=None)
+    for result in results:
+        if result.error:
+            state = f"[red]{result.error}[/red]"
+        else:
+            colour = {"embedded": "green", "catalog": "green",
+                      "unsigned": "red", "unknown": "yellow"}[result.signature.state.value]
+            state = f"[{colour}]{result.signature.state.value}[/{colour}]"
+        count = len(result.findings)
+        table.add_row(
+            Path(result.path).name,
+            result.sha256[:_HASH_SHOWN] if result.sha256 else "-",
+            state,
+            f"[yellow]{count}[/yellow]" if count else "0",
+        )
+    console.print(table)
+
+    signed = sum(
+        1 for r in results
+        if not r.error and r.signature.state.value in ("embedded", "catalog")
+        and r.signature.verified
+    )
+    flagged = sum(1 for r in results if r.findings)
+    console.print(
+        f"\n{len(results)} files, {signed} signed and verified, {flagged} with findings"
+    )
+
+
 def write(result: ExeResult, path: str | Path) -> str:
     """Render to the file the name asks for. Returns the format used."""
     chosen = format_for(path)
@@ -213,13 +273,23 @@ def write(result: ExeResult, path: str | Path) -> str:
     return chosen
 
 
-def _signature_sentence(result: ExeResult) -> str:
+def write_many(results: Sequence[ExeResult], path: str | Path) -> str:
+    """Render a whole run to the file the name asks for. Returns the format."""
+    chosen = format_for(path)
+    text = to_json_many(results) if chosen == "json" else to_markdown_many(results)
+    Path(path).write_text(text + "\n", encoding="utf-8")
+    return chosen
+
+
+def signature_sentence(signature: Signature) -> str:
     """One line that does not overstate what was checked.
 
     The difference between "unsigned" and "unknown" is the whole reason the
     signature module has three paths, so it has to survive into the report.
+
+    Takes the signature rather than the whole result, because `verify` has
+    nothing else: it reads the signature and stops.
     """
-    signature = result.signature
     state = signature.state.value
 
     if state == "embedded":
