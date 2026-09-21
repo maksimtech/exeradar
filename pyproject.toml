@@ -28,8 +28,10 @@ dependencies = [
     # so it installs on 3.14 without a build. See ARCHITECTURE.md section 2.
     "lief>=1.0.0",
     # One job only: decoding the RFC3161 TSTInfo that LIEF exposes but does not
-    # parse, which is where the countersignature date lives.
-    "signify>=0.9.2",
+    # parse, which is where the countersignature date lives. signify was the
+    # obvious choice and depends on oscrypto, unmaintained since 2022 and
+    # broken against OpenSSL 3.x; asn1crypto is pure Python and enough.
+    "asn1crypto>=1.5.1",
     "typer>=0.9.0",
     "rich>=13.0.0",
     "httpx>=0.27.0",

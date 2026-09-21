@@ -118,60 +118,64 @@ def _cert_date(value) -> str | None:
 
 
 def _timestamp(path: Path) -> tuple[str | None, str | None, str | None]:
-    """The one job signify is a dependency for.
+    """Decode the RFC3161 token that LIEF hands over but does not open.
 
-    LIEF exposes the RFC3161 countersignature as a structure but does not
-    decode the TSTInfo inside it, so the time the file was signed is not
-    reachable through LIEF alone. Without it a countersignature proves nothing,
-    which matters most for a certificate that has since expired.
+    LIEF exposes the countersignature as a structure and stops there: the time
+    the file was signed lives in the TSTInfo inside it. Without that time a
+    countersignature proves nothing, which matters most for a certificate that
+    has since expired — the fixture in this repository is exactly that case.
 
-    Returns the reason as a third value rather than swallowing it. A timestamp
-    that is missing because the token was absent and one that is missing
-    because the decoder raised look identical from the outside, and only one of
-    them is a fact about the file.
+    signify was the obvious way to do this and was dropped: it depends on
+    oscrypto, unmaintained since March 2022, whose libcrypto version detection
+    fails against OpenSSL 3.x. That surfaced as LibraryNotFoundError on the
+    Linux CI while Windows was fine. asn1crypto is pure Python and already
+    understands the structure.
+
+    Returns the reason as a third value rather than swallowing it: a timestamp
+    missing because the token was absent and one missing because the decoder
+    raised look identical from the outside, and only one is a fact about the
+    file.
     """
     try:
-        from signify.authenticode import AuthenticodeFile
+        from asn1crypto import cms, tsp
 
-        with path.open("rb") as handle:
-            signed = AuthenticodeFile.from_stream(handle)
-            for signature in signed.signatures:
-                counter = getattr(signature.signer_info, "countersigner", None)
-                if counter is None:
-                    continue
-                when = getattr(counter, "signing_time", None)
-                return (
-                    f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
-                    _timestamper(counter),
-                    None if when else "the token carried no signing time",
-                )
+        binary = lief.PE.parse(str(path))
+        if binary is None or not binary.signatures:
+            return None, None, None
+
+        content = cms.ContentInfo.load(bytes(binary.signatures[0].raw_der))
+        signer = content["content"]["signer_infos"][0]
+        tokens = [
+            attribute for attribute in signer["unsigned_attrs"]
+            if attribute["type"].native == "microsoft_time_stamp_token"
+        ]
+        if not tokens:
+            return None, None, None
+
+        signed = tokens[0]["values"][0]["content"]
+        info = tsp.TSTInfo.load(signed["encap_content_info"]["content"].contents)
+        when = info["gen_time"].native
+        return (
+            f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+            _authority(signed),
+            None if when else "the token carried no gen_time",
+        )
     except Exception as exc:  # noqa: BLE001 - reported, not hidden
         return None, None, f"{type(exc).__name__}: {exc}"
-    return None, None, None
 
 
-def _timestamper(counter) -> str | None:
-    """Who issued the timestamp, which the RFC3161 signer_info only points at.
+def _authority(signed) -> str | None:
+    """The timestamping authority: the one certificate in the token that is not a CA.
 
-    signify gives the countersigner an issuer and a serial but no certificate,
-    so the authority has to be found among the certificates the token carries.
-    Matching on the serial is exact; the non-CA certificate is the fallback,
-    since a token bundles the authority and the CA that vouches for it.
+    A token bundles the authority together with the CA that vouches for it, so
+    the leaf is the one that actually issued the time.
     """
-    certificates = list(getattr(counter, "certificates", []) or [])
-    if not certificates:
-        return None
-
-    wanted = getattr(getattr(counter, "signer_info", None), "serial_number", None)
-    if wanted is not None:
-        for certificate in certificates:
-            if getattr(certificate, "serial_number", None) == wanted:
-                return str(certificate.subject)
-
-    for certificate in certificates:
-        if "Timestamping CA" not in str(certificate.subject):
-            return str(certificate.subject)
-    return str(certificates[0].subject)
+    for wrapped in signed["certificates"]:
+        certificate = wrapped.chosen
+        constraints = certificate.basic_constraints_value
+        if not (constraints and constraints["ca"].native):
+            return certificate.subject.human_friendly
+    return None
 
 
 # ---------------------------------------------------------------------------

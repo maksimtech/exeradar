@@ -55,7 +55,7 @@ module with three outputs, and `--output` infers the format from the extension.
 | Package | Why | Measured |
 | --- | --- | --- |
 | `lief` | PE, ELF and Mach-O in one library | 1.0.0, July 2026, 76 wheels; installs on Python 3.14 through a `cp312-abi3` wheel |
-| `signify` | RFC3161 timestamp decoding, and nothing else | 0.9.2, December 2025 |
+| `asn1crypto` | RFC3161 timestamp decoding, and nothing else | 1.5.1, pure Python |
 | `typer`, `rich` | CLI and console rendering, as the family | |
 | `httpx` | `law_fetcher` | |
 
@@ -63,10 +63,16 @@ module with three outputs, and `--output` infers the format from the extension.
 2024-08-26, it covers PE only, and pairing it with `pyelftools` and `macholib`
 for v2 would mean three parsers with three models.
 
-`signify` earns its place for one job. LIEF exposes the countersignature
-structure but not the time inside it: the date lives in the TSTInfo of
-`content_info.value` and LIEF does not decode the ASN.1. Everything else —
-headers, sections, imports, certificate chain, `verify_signature()` — is LIEF.
+`asn1crypto` earns its place for one job. LIEF exposes the countersignature
+structure but not the time inside it: the date lives in the TSTInfo and LIEF
+does not decode the ASN.1. Everything else — headers, sections, imports,
+certificate chain, `verify_signature()` — is LIEF.
+
+`signify` was the first choice and was dropped after it failed on the Linux
+runners with `LibraryNotFoundError: Error detecting the version of libcrypto`.
+It depends on `oscrypto`, whose last release is 2022-03-18 and whose libcrypto
+version detection does not cope with OpenSSL 3.x. asn1crypto parses the same
+structure in pure Python, with no native library to find.
 
 ---
 
@@ -86,8 +92,8 @@ GlobalSign to `CN=NOTEPAD++`, valid 2025-10-09 to 2028-10-09, an `MsCounterSign`
 RFC3161 token carrying four certificates, and `VERIFICATION_FLAGS.OK`.
 
 Two gaps to work around, both in the countersignature: the timestamp date is not
-exposed, which is what `signify` is for, and `signers[0].cert` comes back `None`
-even though the certificates are present in the structure.
+exposed, which is what `asn1crypto` is for, and `signers[0].cert` comes back
+`None` even though the certificates are present in the structure.
 
 ### B. Catalog signature — Windows only
 
