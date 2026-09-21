@@ -1,0 +1,50 @@
+name: Tests
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  test:
+    name: test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Keep in sync with the classifiers in pyproject.toml
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        # --group needs pip >= 25.1 to read PEP 735 [dependency-groups]
+        run: |
+          python -m pip install --upgrade pip
+          pip install --group dev -e .
+      - name: Run test suite
+        run: pytest tests/ -v
+
+  summary:
+    # The branch ruleset requires one check name that survives matrix changes.
+    # The matrix job cannot provide it: its contexts carry the Python version,
+    # so they change whenever the matrix does. always(): a skipped required
+    # check counts as passed, so this has to run even when the matrix fails,
+    # and fail explicitly in that case.
+    name: Tests
+    needs: [test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: All test jobs succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || { echo "::error::A required test job ended with: $result"; exit 1; }
+          done

@@ -1,0 +1,44 @@
+name: SonarCloud Analysis
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+jobs:
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    # GitHub passes no Actions secrets to Dependabot or fork PRs: there the
+    # token is empty and the scan fails with "Not authorized". A step's `if:`
+    # cannot read `secrets`, so the job publishes only whether it exists; the
+    # token itself stays with the scanner. Those runs still test and build
+    # coverage. This also keeps the workflow green before the Sonar project
+    # exists at all.
+    env:
+      SONAR_ENABLED: ${{ secrets.SONAR_TOKEN != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --group dev -e .
+      - name: Run tests with coverage
+        run: pytest tests/ --cov --cov-report=xml:coverage.xml
+
+      - name: SonarQube Scan
+        if: ${{ env.SONAR_ENABLED == 'true' }}
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Report skipped scan
+        if: ${{ env.SONAR_ENABLED != 'true' }}
+        run: echo "::notice title=SonarCloud skipped::SONAR_TOKEN is not available to this run (Dependabot PR, fork PR, or the project is not set up yet)."
