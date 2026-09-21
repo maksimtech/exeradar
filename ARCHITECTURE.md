@@ -29,7 +29,7 @@ exeradar/
   report.py            console, JSON, Markdown
   law_checker.py       findings -> legal citations
   law_cache.py         from the family, unchanged
-  law_fetcher.py       from the family, unchanged
+  law_fetcher.py       from the family, plus annexes and the Cellar source
   utils.py
 tests/
   fixtures/            sample binaries, legal HTML
@@ -150,24 +150,83 @@ which is the normal case in CI.
 
 ## 4. `law_checker` integration
 
-The machinery is reused as it stands: `Citation`, `ActStatus`, `LawCheckResult`,
-`LawCache` and `law_fetcher` are self-contained and depend only on the standard
-library. Only the `FINDING_ARTICLES` map has to be written.
+The question this section opened with — what to cite for an artefact, when the
+rest of the family cites the GDPR for the processing of personal data — has
+been answered against the texts. The answer is the **Cyber Resilience Act**,
+regulation (EU) 2024/2847, and it cost two changes to machinery that was
+supposed to be reused unchanged.
 
-What to cite is an open question, and it is not the one the other Radars answer.
-They cite the GDPR because they examine the processing of personal data;
-ExeRadar examines an artefact, where an unsigned binary is not by itself
-unlawful processing. Candidates, in order of how well they fit:
+### What the CRA actually says
 
-- **Cyber Resilience Act**, regulation (EU) 2024/2847, which governs products
-  with digital elements and their secure development, SBOM and vulnerability
-  handling. The closest fit, and unused by the rest of the family. **To be
-  verified**: that the text is reachable from EUR-Lex through the existing
-  `law_fetcher`, and which articles actually apply.
-- **NIS2**, directive (EU) 2022/2555 art. 21, supply chain security — the right
-  reference for "is this signed by who it claims".
-- **GDPR** art. 32 for findings that touch the security of processing: an
-  expired certificate, a plaintext endpoint.
+Its articles do not contain the requirements. Article 6 allows a product on the
+market only if it "meets the essential cybersecurity requirements set out in
+Part I of Annex I", and article 13(1) puts that duty on the manufacturer;
+both point at **Annex I** and stop. Citing them on their own would be citing a
+pointer, so `law_fetcher` learned to address annexes: `"Allegato I, Parte I"`
+is a fetchable unit, and its points resolve as `"Allegato I, Parte I(2)(f)"`.
+The part belongs in the reference because Part I and Part II are both numbered
+from (1).
+
+The provision that carries the signature findings is Annex I, Part I(2)(f):
+products shall *"proteggono l'integrità ... dei comandi, dei programmi e della
+configurazione da qualsiasi manipolazione o modifica non autorizzata"*. A code
+signature is how that integrity can be checked at all, so its absence, its
+failure and the expiry of the key behind it are one requirement seen three
+times.
+
+### Where the text comes from
+
+Not from `eur-lex.europa.eu` any more. That host now answers every automated
+request with HTTP 202 and an AWS WAF challenge (`x-amzn-waf-action: challenge`)
+— measured on the CRA and on the GDPR, in both languages, so it is the client
+being refused and not the document being missing. The Publications Office
+serves the same acts, in the same ELI markup, at
+`publications.europa.eu/resource/celex/<CELEX>`, which is the interface that
+exists for machines. `fetch_act_html` tries it first and falls back to the old
+page, in case the rule is relaxed again.
+
+**This affects the whole family**: APKRadar, MailRadar, PatchRadar and
+CookieRadar all fetch through the blocked host and will cite from cache until
+they take the same route.
+
+### The mapping
+
+| Finding | Cited |
+| --- | --- |
+| `unsigned` | CRA Annex I, Part I(2)(f); CRA art. 13(1); NIS2 art. 21(2)(d); GDPR art. 32(1) |
+| `signature_invalid` | the same four |
+| `certificate_expired` | CRA Annex I, Part I(2)(f); GDPR art. 32(1) |
+| `hardcoded_ip` | CRA Annex I, Part I(2)(j) |
+| `known_vulnerabilities` *(not produced yet)* | CRA Annex I, Part I(2)(a), Part II(1) and (2); NIS2 art. 21(2)(e) |
+
+Three refusals are as much a part of the design as the citations.
+
+- **No finding for `http://` URLs.** The obvious candidate was Annex I, Part
+  I(2)(e), confidentiality in transit. The only URL in this repository's own
+  fixture is `http://schemas.microsoft.com/SMI/2016/WindowsSettings`, an XML
+  namespace from the PE manifest — a finding that fires on every Windows
+  binary with a manifest is not a finding.
+- **`hardcoded_ip` cites one provision and admits its weakness.** Part I(2)(j)
+  asks products to "limit attack surfaces, including external interfaces"; it
+  is a general requirement, not a rule about addresses, and the report says so
+  in a note rather than borrowing weight from a stronger article.
+- **`unknown` signatures cite nothing.** Off Windows the catalog cannot be
+  consulted, so the absence of an embedded signature proves nothing. The whole
+  of section 3 exists to avoid that false positive, and a citation is an
+  accusation.
+
+Two scope notes accompany every CRA citation, because both would otherwise
+mislead: the regulation **applies from 11 December 2027** (art. 71(2)), so it is
+in force and not yet applicable; and it binds a manufacturer placing a *product*
+on the market (art. 2(1)), which is not something a PE header can establish
+about a single file.
+
+### What guards it
+
+`test_every_citation_is_in_the_act` parses the acts and fails on a reference
+they do not contain, so the map cannot drift into invention. It reads excerpts
+of the real documents, cut from what the fetcher itself downloads; see
+ATTRIBUTIONS.md.
 
 ---
 

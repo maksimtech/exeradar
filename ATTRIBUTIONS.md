@@ -51,3 +51,27 @@ was valid, which is exactly what a countersignature is for.
 That makes the fixture better than a freshly signed one: the test that asserts
 a valid signature is already past the expiry date, so it cannot start failing
 later for a reason that has nothing to do with this code.
+
+## `tests/fixtures/*_excerpt.html` — EU law
+
+Three excerpts of EU legal acts, used by the tests that check ExeRadar cites
+provisions the acts really contain:
+
+| File | Act | CELEX | Sections kept |
+| --- | --- | --- | --- |
+| `cra_it_excerpt.html` | Cyber Resilience Act, reg. (EU) 2024/2847 | `32024R2847` | art. 6, art. 13, Annex I |
+| `gdpr_it_excerpt.html` | GDPR, reg. (EU) 2016/679 | `32016R0679` | art. 32 |
+| `nis2_it_excerpt.html` | NIS2, dir. (EU) 2022/2555 | `32022L2555` | art. 21 |
+
+Downloaded in Italian from the Publications Office of the European Union
+(`publications.europa.eu/resource/celex/<CELEX>`), the same service
+`law_fetcher` reads at runtime, and cut down to the sections the tests need.
+The markup inside each file is the document's own: the excerpt is a slice, not
+a reconstruction, so a test that passes against it is a test against the real
+rendering.
+
+Reuse of Commission documents is governed by Decision 2011/833/EU, which
+permits reuse — including for commercial purposes — provided the source is
+acknowledged and the meaning is not distorted. Only the authentic text
+published in the *Official Journal of the European Union* has legal value;
+these excerpts are test data and nothing in this repository is legal advice.
