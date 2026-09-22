@@ -7,6 +7,43 @@ and this project uses calendar versioning (YYYY.MM.N).
 
 ## [Unreleased]
 
+## [2026.09.2] - 2026-09-22
+
+Three bugs, all found by pointing ExeRadar at a real third-party binary —
+BIOSdump2license.exe, a BIOS-dump tool — rather than at the test fixture.
+
+### Fixed
+- **`Register*` functions no longer claim the registry category.**
+  `RegisterClassW` registers a window class, which every program with a GUI
+  does, so every GUI program was reported as touching the registry — through
+  USER32, which exports no registry function at all. The rule is now "starts
+  with `Reg` but not with `Register`": kernel32 exports 41 real registry
+  functions and advapi32 82, and none of them begins with `Register`. Leaving
+  the system DLLs out of the category would have hidden those 41, so a test
+  guards that `RegOpenKeyExW` and friends are still recognised through
+  KERNEL32.
+- **Section entropy no longer prints as `-0.00`.** The textbook
+  −Σ p·log₂(p) negates its sum, and for a section of one repeated byte that
+  sum is 0.0, so it returned −0.0. It is now written Σ p·log₂(1/p), which
+  cannot produce a negative zero.
+- **…and the report now actually uses that function.** Sections were measured
+  with LIEF's own `section.entropy`, which has the same flaw, so fixing
+  ExeRadar's function changed nothing a user saw; only rerunning the tool on
+  the binary showed it. The values agree with LIEF's to within 1.2 × 10⁻¹⁴.
+- **URLs stored back to back are reported separately.** A font's name table
+  keeps its strings with no separator, and three URLs came out as one. A URL
+  now ends where another scheme begins; each part is still trimmed of the
+  DER debris certificates leave around theirs.
+
+### Notes
+- Two existing tests could not have caught the entropy bug: both compared
+  values (`== approx(0.0)`, `0.0 <= entropy`), and −0.0 equals 0.0. The new
+  test checks the sign.
+- A URL followed directly by ordinary text keeps that text
+  (`…/licenseNK57`): with no separator in the data there is nothing honest to
+  cut on.
+- 255 tests pass, 28 more than 2026.09.1.
+
 ## [2026.09.1] - 2026-09-21
 
 First release. Static analysis of PE binaries: headers, imports, strings, code
@@ -104,5 +141,6 @@ signing, and the legal provisions the findings concern.
   `LibraryNotFoundError`.
 - Requires Python 3.11 or later; tested on 3.11, 3.12, 3.13 and 3.14.
 
-[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.09.1...HEAD
+[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.09.2...HEAD
+[2026.09.2]: https://github.com/maksimtech/exeradar/releases/tag/v2026.09.2
 [2026.09.1]: https://github.com/maksimtech/exeradar/releases/tag/v2026.09.1
