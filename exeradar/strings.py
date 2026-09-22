@@ -30,7 +30,14 @@ _PRINTABLE = rb"[\x20-\x7e]"
 # The excluded characters are the ones RFC 3986 does not allow unescaped, which
 # is what ends the URL when it is embedded in the XML of a PE manifest:
 # .../WindowsSettings">true</longPathAware> was being reported whole.
-_URL = re.compile(r"""(?:https?|ftps?)://[^\s\x00"'<>`\\]+""", re.I)
+#
+# A URL also ends where another scheme begins. A font's name table stores its
+# strings back to back with no separator, and the one embedded in
+# BIOSdump2license.exe gave three URLs as a single string. The cost is a URL
+# carrying an unescaped one in its query — ?to=http://b — which comes out as
+# two; both hosts are then reported, which for this tool is the useful half.
+_SCHEME = r"(?:https?|ftps?)://"
+_URL = re.compile(rf"""{_SCHEME}(?:(?!{_SCHEME})[^\s\x00"'<>`\\])+""", re.I)
 
 # The tail DER leaves behind: a SEQUENCE tag, which prints as '0', and usually
 # one length byte after it. Matched as a shape rather than as a set of unwanted
@@ -132,9 +139,9 @@ def classify(candidates: Iterable[str]) -> Strings:
         if not text:
             continue
 
-        url = _url_in(text)
-        if url:
-            urls.add(url)
+        found_urls = _urls_in(text)
+        if found_urls:
+            urls.update(found_urls)
             continue
         if _is_ipv4(text):
             ips.add(text)
@@ -169,18 +176,18 @@ def from_file(
     return extract(Path(path).read_bytes(), min_length, exclude)
 
 
-def _url_in(text: str) -> str | None:
-    """The URL inside a string, trimmed of the bytes that framed it.
+def _urls_in(text: str) -> list[str]:
+    """Every URL inside a string, each trimmed of the bytes that framed it.
 
     Found by running the first version against the test fixture: six of its
     seven URLs came back as `Vhttp://...crl0t`, scheme and all, because the
-    pattern only asked for "something, then ://".
+    pattern only asked for "something, then ://". Plural since a font's name
+    table ran three of them together; see _URL.
     """
-    match = _URL.search(text)
-    if not match:
-        return None
-    found = match.group()
+    return [url for url in (_trim(m.group()) for m in _URL.finditer(text)) if url]
 
+
+def _trim(found: str) -> str:
     # Trim the DER tail only when what is left still ends in something that
     # looks deliberate — a last path segment with a dot in it, which is what a
     # CRL or certificate URL ends with. Without that guard this would turn
@@ -189,9 +196,8 @@ def _url_in(text: str) -> str | None:
     if trimmed != found:
         tail = trimmed.rsplit("/", 1)[-1]
         if tail and "." in tail:
-            found = trimmed
-
-    return found or None
+            return trimmed
+    return found
 
 
 def _is_ipv4(text: str) -> bool:

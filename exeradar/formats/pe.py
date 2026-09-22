@@ -62,6 +62,18 @@ _FUNCTION_PREFIXES: tuple[tuple[str, str], ...] = (
     ("urldownload", "network"),
 )
 
+# "Register" starts with "Reg" and has nothing else in common with the
+# registry. RegisterClassW registers a window class and every GUI program calls
+# it, so without this every GUI program was reported as touching the registry —
+# BIOSdump2license.exe was, through a USER32 that exports no registry function
+# at all. Counted on Windows 10: kernel32 exports 41 registry functions,
+# advapi32 82, user32 none — and not one of them begins with "Register".
+#
+# Leaving USER32 and KERNEL32 out of the category would have been the other
+# fix, and a worse one: kernel32.dll exports 41 of those functions, so it would
+# have traded a false positive for a false negative.
+_NOT_REGISTRY = "register"
+
 # Exact matches, for the Berkeley sockets names that carry no prefix.
 _FUNCTION_NAMES: dict[str, str] = {
     "socket": "network",
@@ -83,12 +95,18 @@ def entropy(data: bytes) -> float:
     Above roughly 7.0 a section is compressed, encrypted or packed. Empty
     sections are real — .bss has no raw data — so they return 0.0 rather than
     raising.
+
+    Written as p · log2(1/p) rather than the textbook -Σ p · log2(p). The two
+    are equal, but the textbook form negates its sum, and for a section of one
+    repeated byte that sum is 1 · log2(1) = 0.0 — so it returned -0.0, which
+    the report printed as "-0.00". This form has no negation, every term is
+    ≥ 0, and a negative zero cannot arise.
     """
     if not data:
         return 0.0
     total = len(data)
-    return -sum(
-        (count / total) * math.log2(count / total)
+    return sum(
+        (count / total) * math.log2(total / count)
         for count in Counter(data).values()
     )
 
@@ -114,6 +132,8 @@ def categorise(dll: str, functions: Iterable[str] = ()) -> frozenset[str]:
             found.add(_FUNCTION_NAMES[exact])
             continue
         for prefix, category in _FUNCTION_PREFIXES:
+            if category == "registry" and exact.startswith(_NOT_REGISTRY):
+                continue
             if lowered.startswith(prefix) or exact.startswith(prefix):
                 found.add(category)
                 break
@@ -141,12 +161,15 @@ class PEParser:
         result.format = "PE"
         result.arch = str(header.machine).rsplit(".", 1)[-1]
         result.built = self._built(header.time_date_stamps)
+        # Our entropy(), not LIEF's section.entropy: LIEF computes it the
+        # textbook way and returns -0.0 for a section of one repeated byte, and
+        # reading its value meant the tested function never reached the report.
         result.sections = [
             Section(
                 name=section.name,
                 virtual_size=section.virtual_size,
                 raw_size=section.sizeof_raw_data,
-                entropy=section.entropy,
+                entropy=entropy(bytes(section.content)),
             )
             for section in binary.sections
         ]

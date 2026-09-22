@@ -199,6 +199,37 @@ def test_a_url_embedded_in_binary_noise_is_trimmed(text, expected):
     assert strings.classify([text]).urls == [expected]
 
 
+def test_urls_run_together_are_split_at_each_scheme():
+    """A font's name table stores its strings back to back, no separator.
+
+    The NK57 Monospace font embedded in BIOSdump2license.exe gave three URLs
+    as one: `http://typodermicfonts.com/pages/licensehttp://www.typo...`. A
+    scheme can only start a URL, so wherever one appears, the previous URL
+    ended.
+    """
+    text = (
+        "http://typodermicfonts.com/pages/license"
+        "http://www.typodermicfonts.com"
+        "http://typodermicfonts.com/license"
+    )
+    assert strings.classify([text]).urls == sorted([
+        "http://typodermicfonts.com/pages/license",
+        "http://www.typodermicfonts.com",
+        "http://typodermicfonts.com/license",
+    ])
+
+
+def test_the_split_works_across_schemes():
+    text = "ftp://a.example.com/xhttps://b.example.com/y"
+    assert strings.classify([text]).urls == ["ftp://a.example.com/x", "https://b.example.com/y"]
+
+
+def test_each_url_of_a_run_is_still_trimmed_of_der_debris():
+    """The certificate trimming must survive being applied per URL."""
+    text = "Vhttp://example.com/a.crl0thttp://example.com/b.crt0T"
+    assert strings.classify([text]).urls == ["http://example.com/a.crl", "http://example.com/b.crt"]
+
+
 def test_only_real_schemes_count():
     assert strings.classify(["Vhttp://example.com/x"]).urls == ["http://example.com/x"]
     assert strings.classify(["zzz://example.com/x"]).urls == []

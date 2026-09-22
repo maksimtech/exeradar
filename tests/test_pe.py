@@ -14,6 +14,8 @@ They need a real binary and skip when there is none; see conftest.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from exeradar.formats import pe
@@ -71,6 +73,45 @@ def test_advapi32_is_split_by_what_is_actually_called():
     assert pe.categorise("ADVAPI32.dll", ["CryptAcquireContextW"]) == frozenset({"crypto"})
 
 
+@pytest.mark.parametrize("function", [
+    "RegisterClassW",
+    "RegisterClassExA",
+    "RegisterWindowMessageW",
+    "RegisterHotKey",
+    "RegisterEventSourceW",
+    "RegisterServiceCtrlHandlerW",
+])
+@pytest.mark.parametrize("dll", ["USER32.dll", "ADVAPI32.dll", "KERNEL32.dll"])
+def test_registering_something_is_not_touching_the_registry(dll, function):
+    """"Register" starts with "Reg", and that is all the two have in common.
+
+    RegisterClassW registers a window class, which every program with a GUI
+    does — so every GUI program was reported as touching the registry. Found on
+    BIOSdump2license.exe, where USER32 was tagged "registry" although it exports
+    no registry function at all. ADVAPI32's RegisterEventSource (event log) and
+    RegisterServiceCtrlHandler (services) are the same mistake one DLL over.
+    """
+    assert "registry" not in pe.categorise(dll, [function])
+
+
+@pytest.mark.parametrize("function", [
+    "RegOpenKeyExW",
+    "RegSetValueExW",
+    "RegCloseKey",
+    "RegCopyTreeW",
+    "RegConnectRegistryW",
+])
+def test_the_registry_api_is_still_recognised_through_kernel32(function):
+    """Guards the fix against the other obvious one.
+
+    Leaving KERNEL32 out of the registry category would also have silenced the
+    false positive, and traded it for a false negative: kernel32.dll exports 41
+    registry functions — counted on this machine — so a binary writing to the
+    registry through it would go unreported.
+    """
+    assert "registry" in pe.categorise("KERNEL32.dll", [function])
+
+
 def test_categories_accumulate():
     result = pe.categorise("ADVAPI32.dll", ["RegOpenKeyExW", "CreateProcessAsUserW"])
     assert result == frozenset({"registry", "process"})
@@ -92,6 +133,19 @@ def test_every_category_is_declared():
 
 def test_entropy_of_uniform_bytes_is_zero():
     assert pe.entropy(b"\x00" * 4096) == pytest.approx(0.0)
+
+
+def test_entropy_of_uniform_bytes_is_positive_zero():
+    """Not -0.0, which the test above cannot tell apart.
+
+    Shannon's formula negates a sum, and the one term a single repeated byte
+    produces is 1 · log2(1) = 0.0 — negated, -0.0. As a number that equals
+    0.0, so `pytest.approx(0.0)` passes; formatted, it prints "-0.00". Seen on
+    the .tls section of BIOSdump2license.exe.
+    """
+    value = pe.entropy(b"\x00" * 512)
+    assert math.copysign(1.0, value) == 1.0
+    assert f"{value:.2f}" == "0.00"
 
 
 def test_entropy_of_every_byte_once_is_eight():
@@ -124,6 +178,22 @@ def test_sections_are_reported_with_entropy(pe_path):
     for section in result.sections:
         assert 0.0 <= section.entropy <= 8.0
         assert section.virtual_size >= 0
+
+
+def test_section_entropy_comes_from_the_tested_function(pe_path, monkeypatch):
+    """The report kept printing -0.00 after entropy() had been fixed.
+
+    PEParser was reading LIEF's own `section.entropy`, which is computed the
+    textbook way and returns -0.0 just the same, so the function the tests
+    cover never reached the report: the fix passed its unit test and changed
+    nothing a user sees. Only rerunning the tool on BIOSdump2license.exe showed
+    it. This pins the wiring, which together with the sign test above is what
+    actually keeps "-0.00" out of the output.
+    """
+    monkeypatch.setattr(pe, "entropy", lambda data: 1.25)
+    result = pe.PEParser(pe_path).parse(ExeResult(path=str(pe_path), size=0, sha256=""))
+    assert result.sections
+    assert all(section.entropy == 1.25 for section in result.sections)
 
 
 def test_imports_keep_their_function_names(pe_path):
