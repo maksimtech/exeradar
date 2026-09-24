@@ -89,6 +89,19 @@ _FUNCTION_NAMES: dict[str, str] = {
 }
 
 
+
+def _as_text(name: str | bytes) -> str:
+    """A section or import name as text.
+
+    lief types these as `str | bytes` and returns `str` for a well-formed PE —
+    but a name whose bytes are not valid UTF-8 comes back as `bytes`, and a
+    `bytes` value reaching the report would print as `b'.text'`, quoted prefix
+    and all, in both the console output and the JSON.
+    """
+    if isinstance(name, bytes):
+        return name.decode("utf-8", errors="replace")
+    return name
+
 def entropy(data: bytes) -> float:
     """Shannon entropy in bits per byte, 0.0 to 8.0.
 
@@ -166,7 +179,7 @@ class PEParser:
         # reading its value meant the tested function never reached the report.
         result.sections = [
             Section(
-                name=section.name,
+                name=_as_text(section.name),
                 virtual_size=section.virtual_size,
                 raw_size=section.sizeof_raw_data,
                 entropy=entropy(bytes(section.content)),
@@ -175,8 +188,8 @@ class PEParser:
         ]
         result.imports = [
             Import(
-                dll=imported.name,
-                functions=[entry.name for entry in imported.entries if entry.name],
+                dll=_as_text(imported.name),
+                functions=[_as_text(entry.name) for entry in imported.entries if entry.name],
             )
             for imported in binary.imports
         ]

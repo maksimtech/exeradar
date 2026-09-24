@@ -48,14 +48,24 @@ def test_one_repeated_byte_is_exactly_positive_zero(byte, count):
 
 @given(st.binary(min_size=1, max_size=2048))
 def test_entropy_does_not_depend_on_the_order_of_the_bytes(data):
-    """Shannon entropy is a function of the byte counts, nothing else."""
-    assert entropy(data) == entropy(bytes(sorted(data)))
+    """Shannon entropy is a function of the byte counts, nothing else.
+
+    Compared with a tolerance, not for equality. The two calls sum the same
+    terms in a different order, and floating-point addition is not associative:
+    CI found 2.1971597234241487 against 2.197159723424149 — the same number to
+    fifteen digits. An exact assertion here tests the adder, not the entropy.
+    """
+    assert entropy(data) == pytest.approx(entropy(bytes(sorted(data))))
 
 
 @given(st.binary(min_size=1, max_size=1024), st.integers(min_value=2, max_value=5))
 def test_repeating_a_section_does_not_change_its_entropy(data, times):
-    """The proportions are unchanged, so the bits per byte are too."""
-    assert entropy(data * times) == entropy(data)
+    """The proportions are unchanged, so the bits per byte are too.
+
+    With a tolerance, for the same reason as the case above: the longer input
+    sums more terms, in a different order.
+    """
+    assert entropy(data * times) == pytest.approx(entropy(data))
 
 
 @given(st.sets(st.integers(min_value=0, max_value=255), min_size=1, max_size=64))
