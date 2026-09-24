@@ -7,6 +7,55 @@ and this project uses calendar versioning (YYYY.MM.N).
 
 ## [Unreleased]
 
+## [2026.09.3] - 2026-09-24
+
+### Fixed
+- **Catalog-signed files with a non-cp1252 signer no longer crash the scan.**
+  The catalog path — path B of ARCHITECTURE.md section 3, and the only code here
+  that runs on Windows and nowhere else — asked PowerShell for a certificate
+  Subject and decoded the answer with the locale encoding. A Subject carries
+  whichever alphabet the signing CA uses, and one outside cp1252 could not be
+  decoded. Because `capture_output` collects the pipes on reader threads, that
+  failure never arrived as an exception: it left `stdout` as `None`, and reading
+  it raised `AttributeError`, which the surrounding `except (OSError,
+  SubprocessError)` does not catch. Both ends are now pinned to UTF-8, and an
+  undecodable answer reports `UNKNOWN` — "I could not tell" — rather than
+  raising. Ten tests cover it; Linux CI can reach none of them, because
+  `catalog_available()` is false there.
+- **`EXERADAR_HOME` is no longer taken literally.** `~/cache` made a directory
+  actually named `~`, which is what anyone writing that in a Dockerfile `ENV`
+  got. A relative value resolved against the working directory, so the cache
+  landed somewhere different depending on where the command ran from and quietly
+  stopped being one cache. And `"   "` is truthy, so whitespace became a
+  directory name. A tilde is expanded, a blank value means unset, and a relative
+  value is read against `$HOME` — the variable is called `*_HOME`, and it has to
+  mean the same thing wherever the command is run.
+- **`f"{signature.state}"` renders `embedded`, not `SignatureState.EMBEDDED`.**
+  `SignatureState` is a `StrEnum` rather than a `(str, Enum)` mixin. Every
+  caller already wrote `.value`, so no output changes; the two spellings now
+  agree instead of relying on everyone remembering which to use.
+
+### Changed
+- ruff, mypy, hypothesis and mutmut are development dependencies, with a
+  `Quality` workflow running ruff and mypy on every push and pull request, and a
+  weekly, non-blocking mutation run. mypy is permissive rather than strict: the
+  permissive pass found 42 real defects across the family, all fixed.
+- The suite gains fourteen properties checked against generated input, including
+  one that pins `entropy()` returning positive zero — `0.0 == -0.0`, so an
+  equality assertion cannot tell the two apart and the `-0.00` in the report
+  could have come back. Another pins that `normalize_text` is idempotent: its
+  output is hashed, and that hash is what says "the law changed", so a
+  normalisation that drifted would report a change nobody made.
+- A contract test refuses any code in this repository that lets the locale
+  choose a text encoding.
+- **Every string the tool writes itself is now in English**, which the
+  CHANGELOGs already were. The report's section is `Provisions applied` rather
+  than `Norme applicate`, and finding titles, scope notes, evidence lines and
+  the release script's messages follow. What the tool *quotes* is unchanged: a
+  provision's text is fetched from the official Italian version of each act and
+  hashed, so translating it would change every SHA-256 in every cache and report
+  "the law changed" for every citation on the next run, for nothing.
+
 ## [2026.09.2] - 2026-09-22
 
 Three bugs, all found by pointing ExeRadar at a real third-party binary —
