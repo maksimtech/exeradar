@@ -14,8 +14,8 @@ noted where they appear.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from exeradar.models import Strings
 

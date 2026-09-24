@@ -12,8 +12,10 @@ renderer.
 
 from __future__ import annotations
 
-import typer
+import contextlib
 import sys
+
+import typer
 
 
 def enable_utf8_output() -> None:
@@ -39,10 +41,8 @@ def enable_utf8_output() -> None:
         encoding = (getattr(stream, "encoding", "") or "").lower().replace("-", "")
         if encoding == "utf8":
             continue
-        try:
+        with contextlib.suppress(ValueError, OSError):
             reconfigure(encoding="utf-8", errors="replace")
-        except (ValueError, OSError):
-            pass
 
 enable_utf8_output()
 
