@@ -36,12 +36,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 from exeradar import law_fetcher
-from exeradar.law_cache import LawCache
-from exeradar.law_fetcher import CRA, GDPR, NIS2, Act, LawFetchError
+from exeradar.law_cache import Key, LawCache
+from exeradar.law_fetcher import CRA, GDPR, NIS2, Act, LawFetchError, Provision
 from exeradar.models import ExeResult, Finding, SignatureState
 
 # ─── Mapping: ExeRadar findings → provisions ──────────────────────────────────
@@ -129,7 +128,7 @@ _CERT_TIME = "%Y-%m-%d %H:%M:%S"
 _ANNEX_CITATION = re.compile(r"^(?:Allegato|Annex)\b", re.I)
 
 
-def _expiry(value: Optional[str]) -> Optional[datetime]:
+def _expiry(value: str | None) -> datetime | None:
     """The expiry date as a moment, or None when it cannot be read.
 
     Unreadable is not expired. A date the parser could not make sense of is a
@@ -138,7 +137,7 @@ def _expiry(value: Optional[str]) -> Optional[datetime]:
     if not value:
         return None
     try:
-        return datetime.strptime(value, _CERT_TIME).replace(tzinfo=timezone.utc)
+        return datetime.strptime(value, _CERT_TIME).replace(tzinfo=UTC)
     except ValueError:
         return None
 
@@ -147,7 +146,7 @@ def _is_local(address: str) -> bool:
     return address == _UNSPECIFIED or address.startswith(_LOOPBACK)
 
 
-def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[str, list[str]]:
+def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, list[str]]:
     """
     Findings in an ExeResult, with the evidence for each.
 
@@ -159,7 +158,7 @@ def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[st
     """
     if result.error:
         return {}
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     found: dict[str, list[str]] = {}
     signature = result.signature
@@ -180,7 +179,7 @@ def findings_of(result: ExeResult, *, now: Optional[datetime] = None) -> dict[st
             # A countersignature answers the question the expiry raises: it
             # says the file was signed while the certificate was still valid,
             # which is why LIEF still verifies this repository's own fixture.
-            if expiry is not None and expiry < now and not signature.timestamp:
+            if leaf and expiry is not None and expiry < now and not signature.timestamp:
                 found["certificate_expired"] = [
                     f"{leaf.subject} expired on {leaf.valid_to}, with no RFC3161 countersignature"
                 ]
@@ -206,7 +205,7 @@ SEVERITY = {
 }
 
 
-def findings_for(result: ExeResult, *, now: Optional[datetime] = None) -> list[Finding]:
+def findings_for(result: ExeResult, *, now: datetime | None = None) -> list[Finding]:
     """The same findings as `findings_of`, as the objects the model carries."""
     return [
         Finding(id=name, severity=SEVERITY[name], evidence="; ".join(evidence))
@@ -214,7 +213,7 @@ def findings_for(result: ExeResult, *, now: Optional[datetime] = None) -> list[F
     ]
 
 
-def notes_of(result: ExeResult, *, now: Optional[datetime] = None) -> list[str]:
+def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
     """Remarks that belong in the report without being citations.
 
     An act is only qualified when something actually cites it: a note about
@@ -248,8 +247,8 @@ class Citation:
     finding: str
     law: str                      # act as cited: "GDPR"
     article: str                  # "32(1)" or "Allegato I, Parte I(2)(f)"
-    sha256: Optional[str]         # None when the text could not be obtained
-    version_date: Optional[str]   # YYYY-MM-DD the wording was downloaded
+    sha256: str | None         # None when the text could not be obtained
+    version_date: str | None   # YYYY-MM-DD the wording was downloaded
 
 
 @dataclass(frozen=True)
@@ -258,7 +257,7 @@ class ActStatus:
     # "verified": downloaded now from the act's source; "cache": source
     # unreachable, cached copy; "unavailable": no text at all
     source: str
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
@@ -277,12 +276,12 @@ class LawCheckResult:
 def check(
     subject: ExeResult,
     *,
-    cache: Optional[LawCache] = None,
-    now: Optional[datetime] = None,
+    cache: LawCache | None = None,
+    now: datetime | None = None,
     **context,
 ) -> LawCheckResult:
     """Cite the provisions that apply to the findings about `subject`."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     evidence = findings_of(subject, now=now, **context)
     notes = notes_of(subject, now=now, **context)
     cited = [
@@ -296,8 +295,9 @@ def check(
     cache = cache or LawCache()
 
     acts = list(dict.fromkeys(act for _, act, _ in cited))
-    fresh = {}
-    errors = {}
+    # Keyed by (celex, article) — the cache's key, not the fetcher's.
+    fresh: dict[Key, Provision] = {}
+    errors: dict[Act, str] = {}
     for act in acts:
         # The units cited — "13" is the article behind "13(1)", "Allegato I,
         # Parte I" the annex part behind its points — plus ALSO_FETCH
@@ -305,13 +305,13 @@ def check(
             [ref.split("(")[0] for _, a, ref in cited if a == act] + list(ALSO_FETCH.get(act, ()))
         ))
         try:
-            provisions = law_fetcher.fetch_provisions(act, articles, now=now)
+            by_article = law_fetcher.fetch_provisions(act, articles, now=now)
         except LawFetchError as e:
             errors[act] = str(e)
         else:
-            fresh.update({p.key: p for p in provisions.values()})
+            fresh.update({p.key: p for p in by_article.values()})
 
-    changed = {}
+    changed: dict[Key, str] = {}
     try:
         if fresh:
             provisions, changed = cache.update(fresh, checked_at=law_fetcher.utc_stamp(now))

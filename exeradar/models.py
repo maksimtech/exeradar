@@ -7,12 +7,16 @@ and Markdown outputs from one model, so the model is what the parsers target.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional
+from enum import StrEnum
 
 
-class SignatureState(str, Enum):
+class SignatureState(StrEnum):
     """The three paths of ARCHITECTURE.md section 3, plus their honest gap.
+
+    StrEnum rather than (str, Enum): with the mixin, f"{state}" renders
+    "SignatureState.EMBEDDED" while state.value renders "embedded", and every
+    caller here has to remember .value. test_report.py already guards that a
+    consumer sees "embedded"; StrEnum makes the two forms agree instead.
 
     UNKNOWN exists because it is not the same as UNSIGNED: on Linux and macOS
     the catalog cannot be consulted, so the absence of an embedded signature
@@ -30,24 +34,24 @@ class SignatureState(str, Enum):
 class Certificate:
     subject: str
     issuer: str
-    valid_from: Optional[str] = None
-    valid_to: Optional[str] = None
-    serial: Optional[str] = None
-    algorithm: Optional[str] = None
+    valid_from: str | None = None
+    valid_to: str | None = None
+    serial: str | None = None
+    algorithm: str | None = None
     is_ca: bool = False
 
 
 @dataclass
 class Signature:
     state: SignatureState = SignatureState.UNKNOWN
-    verified: Optional[bool] = None
-    signer: Optional[str] = None
+    verified: bool | None = None
+    signer: str | None = None
     chain: list[Certificate] = field(default_factory=list)
     # From the RFC3161 token; None when there is no countersignature, which
     # means nothing proves when the file was signed.
-    timestamp: Optional[str] = None
-    timestamper: Optional[str] = None
-    detail: Optional[str] = None
+    timestamp: str | None = None
+    timestamper: str | None = None
+    detail: str | None = None
 
 
 @dataclass
@@ -90,12 +94,12 @@ class ExeResult:
     path: str
     size: int
     sha256: str
-    format: Optional[str] = None
-    arch: Optional[str] = None
-    built: Optional[str] = None
+    format: str | None = None
+    arch: str | None = None
+    built: str | None = None
     sections: list[Section] = field(default_factory=list)
     imports: list[Import] = field(default_factory=list)
     strings: Strings = field(default_factory=Strings)
     signature: Signature = field(default_factory=Signature)
     findings: list[Finding] = field(default_factory=list)
-    error: Optional[str] = None
+    error: str | None = None

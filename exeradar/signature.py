@@ -229,6 +229,11 @@ def _catalog(path: Path) -> Signature | None:
     # doubling, which also makes the value inert.
     quoted = str(path).replace("'", "''")
     script = (
+        # A certificate Subject carries whichever alphabet the CA uses, and
+        # PowerShell writes stdout in the console encoding — cp850 or cp1252
+        # depending on the machine. Both ends are pinned to UTF-8 so that the
+        # same file gives the same answer on every Windows install.
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
         "$ErrorActionPreference='Stop';"
         f"$s = Get-AuthenticodeSignature -LiteralPath '{quoted}';"
         '"$($s.Status)|$($s.SignatureType)|$($s.SignerCertificate.Subject)|'
@@ -237,11 +242,18 @@ def _catalog(path: Path) -> Signature | None:
     try:
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, timeout=_POWERSHELL_TIMEOUT,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=_POWERSHELL_TIMEOUT,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if completed.returncode != 0:
+        return None
+    # capture_output collects the pipes on reader threads, so a decoding failure
+    # there does not reach this frame as an exception: it leaves stdout as None.
+    # Dereferencing that raised AttributeError, which the except above does not
+    # cover — a crash instead of the honest "I could not tell".
+    if not completed.stdout:
         return None
 
     parts = (completed.stdout.strip().split("|") + [""] * 4)[:4]
