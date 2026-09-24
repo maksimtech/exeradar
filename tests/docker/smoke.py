@@ -16,7 +16,7 @@ import exeradar  # noqa: E402
 assert exeradar.__version__ == installed, (exeradar.__version__, installed)
 
 result = subprocess.run([sys.executable, "-m", "exeradar", "--help"],
-                        capture_output=True, text=True)
+                        capture_output=True, text=True, encoding="utf-8", errors="replace")
 assert result.returncode == 0, result.stderr
 assert "analyze" in result.stdout, result.stdout
 print("smoke: cli OK")

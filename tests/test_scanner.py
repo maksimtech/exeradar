@@ -56,7 +56,7 @@ def test_a_missing_file_is_an_error_not_an_exception(tmp_path):
 
 def test_a_file_that_is_not_an_executable_says_so(tmp_path):
     plain = tmp_path / "notes.txt"
-    plain.write_text("just text")
+    plain.write_text("just text", encoding="utf-8")
 
     result = scanner.scan(plain)
 
@@ -163,7 +163,8 @@ def test_no_reported_string_comes_only_from_the_signature(signed_pe_path):
 
 def test_excluding_the_signature_drops_the_certificate_urls(signed_pe_path):
     """The whole point, measured: fewer URLs, and no CRL endpoints left."""
-    from exeradar import signature, strings as strings_module
+    from exeradar import signature
+    from exeradar import strings as strings_module
 
     everything = strings_module.from_file(signed_pe_path)
     filtered = strings_module.from_file(

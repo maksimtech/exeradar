@@ -15,7 +15,7 @@ fires on every Windows binary with a manifest is not a finding.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -42,7 +42,7 @@ from exeradar.models import (
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
-NOW = datetime(2026, 9, 21, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 PART_I = "Allegato I, Parte I"
 
 ACT_FIXTURES = {
@@ -107,7 +107,7 @@ def test_mapping():
 
 def test_the_only_finding_nothing_produces_yet_is_declared_as_such():
     """`known_vulnerabilities` waits for a dependency scanner; the rest fire."""
-    assert FUTURE_FINDINGS == {"known_vulnerabilities"}
+    assert {"known_vulnerabilities"} == FUTURE_FINDINGS
     assert set(FINDING_ARTICLES) - FUTURE_FINDINGS == {
         "unsigned", "signature_invalid", "certificate_expired", "hardcoded_ip",
     }
@@ -333,7 +333,7 @@ def test_the_annex_and_the_article_are_fetched_in_one_request(cache, online):
     """Both live in the same act, so the act is downloaded once."""
     check(result(state=SignatureState.UNSIGNED, verified=False), cache=cache, now=NOW)
 
-    by_act = {act: articles for act, articles in online}
+    by_act = dict(online)
     assert set(by_act[CRA]) == {PART_I, "13"}
     assert len(online) == 3
 

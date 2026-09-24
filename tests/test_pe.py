@@ -205,7 +205,7 @@ def test_imports_keep_their_function_names(pe_path):
 
 def test_a_file_that_is_not_a_pe_is_an_error_not_a_crash(tmp_path):
     not_a_pe = tmp_path / "text.exe"
-    not_a_pe.write_text("this is not an executable")
+    not_a_pe.write_text("this is not an executable", encoding="utf-8")
     result = pe.PEParser(not_a_pe).parse(ExeResult(path=str(not_a_pe), size=0, sha256=""))
     assert result.error
     assert result.format is None

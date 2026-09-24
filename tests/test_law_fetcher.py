@@ -26,8 +26,6 @@ import pytest
 from exeradar import law_fetcher
 from exeradar.law_fetcher import (
     CRA,
-    GDPR,
-    NIS2,
     Act,
     LawFetchError,
     parse_articles,
