@@ -172,7 +172,7 @@ def test_an_unknown_signature_is_never_reported_as_unsigned():
     """
     unknown = result(state=SignatureState.UNKNOWN, verified=None)
     assert findings_of(unknown, now=NOW) == {}
-    assert any("non verificabile" in note for note in notes_of(unknown, now=NOW))
+    assert any("not verifiable" in note for note in notes_of(unknown, now=NOW))
 
 
 def test_an_embedded_signature_that_does_not_verify_is_a_finding():
@@ -262,20 +262,20 @@ def test_the_cra_is_cited_before_it_applies_and_the_note_says_so():
 
 def test_the_nis2_and_gdpr_notes_state_whom_those_acts_bind():
     notes = " ".join(notes_of(result(state=SignatureState.UNSIGNED, verified=False), now=NOW))
-    assert "soggetti essenziali e importanti" in notes
-    assert "dati personali" in notes
+    assert "essential and important entities" in notes
+    assert "personal data" in notes
 
 
 def test_a_note_is_only_added_for_an_act_that_is_actually_cited():
     """A hardcoded address cites the CRA alone; NIS2 has nothing to do with it."""
     notes = " ".join(notes_of(result(ips=["203.0.113.7"]), now=NOW))
-    assert "soggetti essenziali e importanti" not in notes
+    assert "essential and important entities" not in notes
     assert "2027" in notes
 
 
 def test_the_hardcoded_address_note_admits_what_cannot_be_told_apart():
     notes = " ".join(notes_of(result(ips=["1.2.3.4"]), now=NOW))
-    assert "versione" in notes
+    assert "version number" in notes
 
 
 # --------------------------------------------------------------------------

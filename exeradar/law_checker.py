@@ -74,11 +74,11 @@ FINDING_ARTICLES: dict[str, tuple[tuple[Act, str], ...]] = {
 }
 
 FINDING_TITLES = {
-    "unsigned": "Binario non firmato",
-    "signature_invalid": "Firma incorporata non valida",
-    "certificate_expired": "Certificato di firma scaduto",
-    "hardcoded_ip": "Indirizzo IP nel binario",
-    "known_vulnerabilities": "Dipendenze con vulnerabilità note",
+    "unsigned": "Unsigned binary",
+    "signature_invalid": "Embedded signature not valid",
+    "certificate_expired": "Signing certificate expired",
+    "hardcoded_ip": "IP address in the binary",
+    "known_vulnerabilities": "Dependencies with known vulnerabilities",
 }
 
 # Declared, mapped, and produced by nothing yet: ExeRadar does not read
@@ -90,31 +90,31 @@ FUTURE_FINDINGS = frozenset({"known_vulnerabilities"})
 ALSO_FETCH: dict = {}
 
 CRA_APPLICATION_NOTE = (
-    "CRA art. 71, par. 2: il regolamento (UE) 2024/2847 si applica dall'11 dicembre 2027 "
-    "(l'art. 14 dall'11 settembre 2026, il capo IV dall'11 giugno 2026); le citazioni "
-    "riguardano quindi una norma in vigore ma non ancora applicabile"
+    "CRA art. 71(2): regulation (EU) 2024/2847 applies from 11 December 2027 "
+    "(art. 14 from 11 September 2026, chapter IV from 11 June 2026); the citations "
+    "therefore concern a rule in force but not yet applicable"
 )
 CRA_SCOPE_NOTE = (
-    "CRA art. 2, par. 1: il regolamento riguarda i prodotti con elementi digitali messi a "
-    "disposizione sul mercato e obbliga il fabbricante; ExeRadar esamina un singolo file "
-    "e non può stabilire di quale prodotto faccia parte"
+    "CRA art. 2(1): the regulation concerns products with digital elements made "
+    "available on the market and binds the manufacturer; ExeRadar examines a single "
+    "file and cannot establish which product it is part of"
 )
 NIS2_SCOPE_NOTE = (
-    "NIS2 art. 21 obbliga i soggetti essenziali e importanti (art. 3 della direttiva): "
-    "verificare che l'organizzazione rientri nell'ambito"
+    "NIS2 art. 21 binds essential and important entities (art. 3 of the directive): "
+    "check that the organisation falls within scope"
 )
 GDPR_SCOPE_NOTE = (
-    "GDPR art. 32 si applica al trattamento di dati personali: ExeRadar non può stabilire "
-    "dal binario se il programma ne tratti"
+    "GDPR art. 32 applies to the processing of personal data: ExeRadar cannot "
+    "establish from the binary whether the program processes any"
 )
 UNKNOWN_SIGNATURE_NOTE = (
-    "firma non verificabile su questa piattaforma: il catalogo di Windows non è "
-    "consultabile, quindi l'assenza di firma incorporata non prova nulla e non viene "
-    "citata alcuna norma"
+    "signature not verifiable on this platform: the Windows catalog cannot be "
+    "consulted, so the absence of an embedded signature proves nothing and no "
+    "provision is cited"
 )
 HARDCODED_IP_NOTE = (
-    "un indirizzo IPv4 letterale e un numero di versione hanno la stessa forma: "
-    "verificare ogni indirizzo prima di trattarlo come un endpoint"
+    "a literal IPv4 address and a version number have the same shape: check each "
+    "address before treating it as an endpoint"
 )
 
 # How a program binds, not somewhere it calls.
@@ -358,14 +358,15 @@ def format_citation(citation: Citation) -> str:
     """One citation as three lines.
 
     An annex is not an article, and the difference shows: "art. Allegato I,
-    Parte I(2)(f)" would be wrong in the one line of the report whose whole
-    job is to be exact about where the rule comes from.
+    Parte I(2)(f)" would be wrong in the one line of the report whose whole job
+    is to be exact about where the rule comes from. The reference itself keeps
+    the spelling the act uses, because that is what a reader has to look up.
     """
     where = citation.article
     if not _ANNEX_CITATION.match(where):
         where = f"art. {where}"
     return (
-        f"Norma applicata: {citation.law} {where}\n"
-        f"SHA256: {citation.sha256 or 'non disponibile'}\n"
-        f"Versione del: {citation.version_date or 'non disponibile'}"
+        f"Provision applied: {citation.law} {where}\n"
+        f"SHA256: {citation.sha256 or 'not available'}\n"
+        f"Version of: {citation.version_date or 'not available'}"
     )

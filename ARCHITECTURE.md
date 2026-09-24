@@ -247,7 +247,7 @@ ExeResult
   findings   [{id, severity, evidence}]
 ```
 
-Three outputs: **console** through Rich with a "Norme applicate" section at the
+Three outputs: **console** through Rich with a "Provisions applied" section at the
 end, as mailradar and cookieradar do; **JSON**, which serialises the whole
 `ExeResult` and is what makes the tool usable from a pipeline; **Markdown** for
 pasting into a ticket.
