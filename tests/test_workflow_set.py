@@ -48,13 +48,13 @@ CAPABILITY = {
 }
 
 KNOWN_GAPS = {
-    # docker.yml publishes an image to Docker Hub on every tag, and
-    # maksimtech/exeradar does not exist there — checked on 2026-09-26, 404
-    # against 200 for the other four Radar. Starting to publish is a decision
-    # about what leaves this repository, so it arrives in a commit of its own.
-    "docker",
-    # docker-scout scans maksimtech/exeradar:latest on Docker Hub, which does not
-    # exist until the line above does.
+    # docker-scout scans maksimtech/exeradar:latest on Docker Hub. Checked on
+    # 2026-09-26: the repository answers 404 there, while the other four Radar
+    # answer 200 — docker.yml exists now but has never run, so there is no image
+    # to scan. Porting it today would give this repository a security workflow
+    # whose every run passes because it finds nothing, which is the one failure
+    # this package is written to tell apart from the others. It goes in after
+    # the first tag publishes an image.
     "docker-scout",
 }
 
