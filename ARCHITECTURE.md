@@ -95,6 +95,13 @@ Two gaps to work around, both in the countersignature: the timestamp date is not
 exposed, which is what `asn1crypto` is for, and `signers[0].cert` comes back
 `None` even though the certificates are present in the structure.
 
+That second gap is why the signer is identified through the CMS `SignerInfo`
+rather than through LIEF: `sid` carries the issuer and serial of the certificate
+that signed. Taking the first non-CA certificate instead worked only until a
+blob carried two leaves — the timestamp authority's is one — and then four
+installers measured on 2026-09-25 were reported as signed by DigiCert or
+Symantec rather than by Anthropic, Dell, Logitech and their author.
+
 ### B. Catalog signature — Windows only
 
 The file carries no signature at all; the signature lives in a `.cat` file under
@@ -199,7 +206,7 @@ they take the same route.
 | `hardcoded_ip` | CRA Annex I, Part I(2)(j) |
 | `known_vulnerabilities` *(not produced yet)* | CRA Annex I, Part I(2)(a), Part II(1) and (2); NIS2 art. 21(2)(e) |
 
-Three refusals are as much a part of the design as the citations.
+Four refusals are as much a part of the design as the citations.
 
 - **No finding for `http://` URLs.** The obvious candidate was Annex I, Part
   I(2)(e), confidentiality in transit. The only URL in this repository's own
@@ -210,6 +217,15 @@ Three refusals are as much a part of the design as the citations.
   asks products to "limit attack surfaces, including external interfaces"; it
   is a general requirement, not a rule about addresses, and the report says so
   in a note rather than borrowing weight from a stronger article.
+- **`hardcoded_ip` is not raised for a binary that imports no network
+  function.** A driver installer carries its version number in the shape of an
+  address, and three of the five measured on 2026-09-24 were valid public
+  addresses — `23.110.0.5` is Intel's WLAN driver version. No octet rule
+  separates those from an endpoint; the import table does, and `pe.categorise`
+  already decides it for what the console prints. The addresses are still
+  reported as facts, and a note says why no finding was raised: "imports no
+  network function" is an observation, not a conclusion, since a packed
+  installer can still resolve ws2_32 at run time.
 - **`unknown` signatures cite nothing.** Off Windows the catalog cannot be
   consulted, so the absence of an embedded signature proves nothing. The whole
   of section 3 exists to avoid that false positive, and a citation is an

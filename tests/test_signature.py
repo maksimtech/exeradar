@@ -28,12 +28,15 @@ def test_catalog_availability_matches_the_platform():
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the off-Windows rule")
-def test_no_embedded_signature_is_not_unsigned_off_windows(tmp_path):
-    """Path B cannot run here, so C is not a conclusion that can be reached."""
-    unsigned = tmp_path / "nothing.exe"
-    unsigned.write_bytes(b"MZ" + b"\x00" * 128)
+def test_no_embedded_signature_is_not_unsigned_off_windows(unsigned_pe_path):
+    """Path B cannot run here, so C is not a conclusion that can be reached.
 
-    result = signature.inspect(unsigned)
+    On a PE that parses and has no signature, so that the platform rule is what
+    produces UNKNOWN. This used to pass `MZ` and zeros, which LIEF cannot parse
+    at all — and an unreadable file is now UNKNOWN for its own reason, which
+    would have made this test pass without the rule it is about.
+    """
+    result = signature.inspect(unsigned_pe_path)
 
     assert result.state is SignatureState.UNKNOWN
     assert result.state is not SignatureState.UNSIGNED
@@ -42,12 +45,15 @@ def test_no_embedded_signature_is_not_unsigned_off_windows(tmp_path):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="path B needs Windows")
-def test_no_signature_anywhere_is_unsigned_on_windows(tmp_path):
-    """Both paths ran and found nothing, so the finding is real."""
-    unsigned = tmp_path / "nothing.exe"
-    unsigned.write_bytes(b"MZ" + b"\x00" * 128)
+def test_no_signature_anywhere_is_unsigned_on_windows(unsigned_pe_path):
+    """Both paths ran and found nothing, so the finding is real.
 
-    result = signature.inspect(unsigned)
+    "Both ran" is the part that needs a readable file: the subject here is a
+    signed binary with its certificate table zeroed, so the embedded path really
+    looked and really found nothing. `MZ` and zeros could not say that — see
+    test_unreadable_pe.py.
+    """
+    result = signature.inspect(unsigned_pe_path)
 
     assert result.state is SignatureState.UNSIGNED
     assert result.verified is False

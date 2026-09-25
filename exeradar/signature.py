@@ -65,6 +65,12 @@ def signed_regions(path: str | Path) -> list[tuple[int, int]]:
 def inspect(path: str | Path) -> Signature:
     path = Path(path)
 
+    # Before anything is concluded: a file that cannot be read cannot be
+    # reported as unsigned. UNSIGNED means both paths ran and found nothing.
+    unreadable = _unreadable(path)
+    if unreadable is not None:
+        return Signature(state=SignatureState.UNKNOWN, verified=None, detail=unreadable)
+
     embedded = _embedded(path)
     if embedded is not None:
         return embedded
@@ -88,6 +94,53 @@ def inspect(path: str | Path) -> Signature:
 
 
 # ---------------------------------------------------------------------------
+# before the three paths: can the file be examined at all
+# ---------------------------------------------------------------------------
+
+
+def _unreadable(path: Path) -> str | None:
+    """Why no conclusion can be drawn about this file, or None if one can.
+
+    Two reasons, both about the file and neither about the platform:
+
+    LIEF returns nothing, so there was no chance to look for an embedded
+    signature. Reporting UNSIGNED then means "we could not read it, so we say it
+    has none", and on Windows the catalog agrees for the same reason — it cannot
+    identify the file either.
+
+    Or the file is shorter than its own headers describe. LIEF is lenient enough
+    to parse 512 bytes of a 104 KB binary and report no signature, because the
+    Authenticode blob sits at the end and the end is missing. A cut-off download
+    is the ordinary way this happens, and calling it unsigned accuses whoever
+    built it of something the network did.
+    """
+    try:
+        binary = lief.PE.parse(str(path))
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return f"not a readable PE: {type(exc).__name__}"
+    if binary is None:
+        return "not a readable PE: the headers could not be parsed"
+
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+
+    for directory in binary.data_directories:
+        if "CERTIFICATE" not in str(directory.type).upper() or not directory.size:
+            continue
+        # The one directory whose first field is a file offset, which is what
+        # makes this comparison meaningful.
+        if directory.rva + directory.size > size:
+            return (
+                "the certificate table starts at "
+                f"{directory.rva} and runs {directory.size} bytes, past the end of a "
+                f"{size}-byte file: truncated, so the signature cannot be read"
+            )
+    return None
+
+
+# ---------------------------------------------------------------------------
 # path A — embedded
 # ---------------------------------------------------------------------------
 
@@ -101,7 +154,7 @@ def _embedded(path: Path) -> Signature | None:
         return None
 
     signature = binary.signatures[0]
-    chain = _chain(signature)
+    chain = _chain(signature, _signer_serial(signature))
     stamp, stamper, problem = _timestamp(path)
 
     detail = f"embedded {signature.digest_algorithm}".replace("ALGORITHMS.", "")
@@ -119,8 +172,42 @@ def _embedded(path: Path) -> Signature | None:
     )
 
 
-def _chain(signature) -> list[Certificate]:
-    """Leaf first: the signer is what a report leads with, not the root."""
+def _signer_serial(signature) -> int | None:
+    """The serial of the certificate that signed, from the CMS SignerInfo.
+
+    A PKCS#7 blob can carry more than one leaf — the timestamp authority's
+    certificate is one — and then the order of the list says nothing about which
+    of them signed. SignerInfo does say: `sid` is the issuer and serial of the
+    signing certificate.
+
+    Returns None when the blob cannot be read or identifies its signer by
+    subject key identifier instead, which CMS also allows. Nothing is guessed
+    from that; the caller falls back to the order.
+    """
+    try:
+        from asn1crypto import cms
+
+        content = cms.ContentInfo.load(bytes(signature.raw_der))
+        sid = content["content"]["signer_infos"][0]["sid"]
+        if sid.name != "issuer_and_serial_number":
+            return None
+        return int(sid.chosen["serial_number"].native)
+    except Exception:  # noqa: BLE001 - a blob we cannot read names nobody
+        return None
+
+
+def _chain(signature, signer_serial: int | None = None) -> list[Certificate]:
+    """Leaf first: the signer is what a report leads with, not the root.
+
+    `signer_serial` is the one the PKCS#7 names. With it, that certificate leads
+    however the blob ordered its contents — otherwise a file whose timestamper
+    travels in the same blob is reported as signed by the timestamper. Without
+    it the order is by is_ca alone, which is what this did before and is still
+    right for a blob with a single leaf.
+
+    No certificate is dropped: the timestamper's is part of what the file
+    carries, and the report shows the chain as well as the signer.
+    """
     certificates = [
         Certificate(
             subject=str(cert.subject),
@@ -133,7 +220,11 @@ def _chain(signature) -> list[Certificate]:
         )
         for cert in signature.certificates
     ]
+    # Sorted, not filtered, and stable: leaves keep their relative order and
+    # the named signer is lifted to the front of them.
     certificates.sort(key=lambda c: c.is_ca)
+    if signer_serial is not None:
+        certificates.sort(key=lambda c: int(c.serial or "0", 16) != signer_serial)
     return certificates
 
 

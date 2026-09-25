@@ -6,7 +6,10 @@ imports, readable strings, code signing.
 **Status: PE works.** Headers, sections with entropy, the import table and its
 categories, classified strings, the three signature paths, and reports as
 console, JSON or Markdown. ELF and Mach-O are recognised by their magic number
-and declined by name — not mistaken for an unknown format.
+and declined by name — not mistaken for an unknown format. That includes a
+universal ("fat") Mach-O, the ordinary shape of a shipped macOS binary, whose
+magic it shares with Java class files: the fat header is validated rather than
+guessed at, so a class file is still declined.
 
 The design is written down first, in [ARCHITECTURE.md](ARCHITECTURE.md), and
 the part worth reading is section 3.
@@ -31,6 +34,12 @@ the catalog cannot be consulted — the absence of an embedded signature is
 reported as `unknown` and never as `unsigned`. Calling a catalog-signed
 Microsoft binary unsigned would be the worst false positive this tool could
 ship.
+
+The same rule applies to the file and not only to the platform. A file that
+cannot be parsed, and one whose own headers place the certificate table past the
+end of it — an interrupted download — are `unknown` too: the signature could not
+be looked for, which is not the same as finding none. Nothing is cited against
+either.
 
 ## Use
 
@@ -151,7 +160,7 @@ The exit code carries the answer:
 | --- | --- |
 | `0` | signed, and the signature verifies |
 | `1` | not signed, or signed and the signature does not verify |
-| `2` | could not be determined: unreadable, not a PE, or no way to check here |
+| `2` | could not be determined: unreadable, truncated, not a PE, or no way to check here |
 
 The third code is the point. Off Windows the catalog cannot be consulted, so a
 file with no embedded signature may be perfectly signed and the tool cannot

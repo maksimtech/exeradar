@@ -36,6 +36,7 @@ from exeradar.law_fetcher import CRA, GDPR, NIS2, LawFetchError, Provision
 from exeradar.models import (
     Certificate,
     ExeResult,
+    Import,
     Signature,
     SignatureState,
     Strings,
@@ -52,6 +53,13 @@ ACT_FIXTURES = {
 }
 
 
+# A binary that can contact an address. `hardcoded_ip` is only raised for one,
+# since a driver installer carries its version number in the same shape — see
+# test_hardcoded_ip_context.py. The tests below are not about that rule; they
+# pass this so that the finding they rely on exists.
+SOCKETS = [Import(dll="WS2_32.dll", functions=["connect"])]
+
+
 def result(
     *,
     state=SignatureState.EMBEDDED,
@@ -59,6 +67,7 @@ def result(
     chain=(),
     timestamp=None,
     ips=(),
+    imports=(),
     error=None,
 ) -> ExeResult:
     return ExeResult(
@@ -67,6 +76,7 @@ def result(
         sha256="aa",
         format="PE",
         error=error,
+        imports=list(imports),
         strings=Strings(ips=list(ips)),
         signature=Signature(
             state=state,
@@ -220,14 +230,19 @@ def test_an_unreadable_expiry_date_is_not_turned_into_a_finding():
 
 
 def test_a_hardcoded_address_is_a_finding():
-    found = findings_of(result(ips=["203.0.113.7"]), now=NOW)
+    found = findings_of(result(ips=["203.0.113.7"], imports=SOCKETS), now=NOW)
     assert set(found) == {"hardcoded_ip"}
     assert found["hardcoded_ip"] == ["203.0.113.7"]
 
 
 def test_loopback_and_the_unspecified_address_are_not_endpoints():
-    """0.0.0.0 and 127.x are how a program binds, not somewhere it calls."""
-    assert findings_of(result(ips=["127.0.0.1", "0.0.0.0"]), now=NOW) == {}
+    """0.0.0.0 and 127.x are how a program binds, not somewhere it calls.
+
+    With sockets imported, so that the rule under test is the one doing the
+    work: a file with no network imports raises nothing anyway, and this would
+    have passed with the loopback rule deleted.
+    """
+    assert findings_of(result(ips=["127.0.0.1", "0.0.0.0"], imports=SOCKETS), now=NOW) == {}
 
 
 def test_a_result_that_failed_to_parse_produces_no_findings():
@@ -238,7 +253,8 @@ def test_a_result_that_failed_to_parse_produces_no_findings():
 
 def test_findings_can_coexist():
     found = findings_of(
-        result(state=SignatureState.UNSIGNED, verified=False, ips=["203.0.113.7"]),
+        result(state=SignatureState.UNSIGNED, verified=False,
+               ips=["203.0.113.7"], imports=SOCKETS),
         now=NOW,
     )
     assert set(found) == {"unsigned", "hardcoded_ip"}
@@ -268,13 +284,19 @@ def test_the_nis2_and_gdpr_notes_state_whom_those_acts_bind():
 
 def test_a_note_is_only_added_for_an_act_that_is_actually_cited():
     """A hardcoded address cites the CRA alone; NIS2 has nothing to do with it."""
-    notes = " ".join(notes_of(result(ips=["203.0.113.7"]), now=NOW))
+    notes = " ".join(notes_of(result(ips=["203.0.113.7"], imports=SOCKETS), now=NOW))
     assert "essential and important entities" not in notes
     assert "2027" in notes
 
 
 def test_the_hardcoded_address_note_admits_what_cannot_be_told_apart():
-    notes = " ".join(notes_of(result(ips=["1.2.3.4"]), now=NOW))
+    """1.2.3.4 is both a valid address and a common version string.
+
+    With sockets in the import table the finding is raised, and this is the note
+    that goes with it. Without them the finding is not raised at all and a
+    different note explains why, which is a different test.
+    """
+    notes = " ".join(notes_of(result(ips=["1.2.3.4"], imports=SOCKETS), now=NOW))
     assert "version number" in notes
 
 
@@ -339,19 +361,19 @@ def test_the_annex_and_the_article_are_fetched_in_one_request(cache, online):
 
 
 def test_the_evidence_travels_with_the_citations(cache, online):
-    outcome = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
     assert outcome.evidence == {"hardcoded_ip": ["203.0.113.7"]}
 
 
 def test_an_act_that_cannot_be_reached_is_cited_from_the_cache(cache, monkeypatch):
     monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
-    first = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    first = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     def unreachable(act, articles, now=None, **kwargs):
         raise LawFetchError("Cellar answered HTTP 202; and EUR-Lex answered HTTP 202")
 
     monkeypatch.setattr(law_fetcher, "fetch_provisions", unreachable)
-    second = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    second = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert [c.sha256 for c in second.citations] == [c.sha256 for c in first.citations]
     assert [status.source for status in second.acts] == ["cache"]
@@ -364,7 +386,7 @@ def test_an_act_reachable_by_neither_route_is_cited_without_a_hash(cache, monkey
         raise LawFetchError("unreachable")
 
     monkeypatch.setattr(law_fetcher, "fetch_provisions", unreachable)
-    outcome = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert outcome.citations[0].sha256 is None
     assert outcome.acts[0].source == "unavailable"
@@ -372,10 +394,10 @@ def test_an_act_reachable_by_neither_route_is_cited_without_a_hash(cache, monkey
 
 def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypatch):
     monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
-    check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch(" amended"))
-    outcome = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]
 
@@ -387,7 +409,7 @@ def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypat
 
 def test_an_annex_citation_does_not_call_itself_an_article(cache, online):
     """"art. Allegato I" would be wrong in the one place it has to be right."""
-    outcome = check(result(ips=["203.0.113.7"]), cache=cache, now=NOW)
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
     rendered = format_citation(outcome.citations[0])
 
     assert "art. Allegato" not in rendered
@@ -413,7 +435,8 @@ def test_every_finding_has_a_severity():
 
 def test_findings_for_builds_the_model_objects():
     found = law_checker.findings_for(
-        result(state=SignatureState.UNSIGNED, verified=False, ips=["203.0.113.7"]),
+        result(state=SignatureState.UNSIGNED, verified=False,
+               ips=["203.0.113.7"], imports=SOCKETS),
         now=NOW,
     )
 

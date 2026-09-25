@@ -31,12 +31,25 @@ _MACHO_MAGICS = (
 # caller can act on.
 _IMPLEMENTED = {"PE"}
 
+# A universal ("fat") archive: several Mach-O slices in one file, which is the
+# ordinary shape of a shipped macOS binary. Both magics are big endian.
+_FAT_MAGICS = {0xCAFEBABE: 20, 0xCAFEBABF: 32}   # magic -> size of one fat_arch
+
+# nfat_arch beyond this is not a build. A Java class file — same magic — has its
+# minor and major version where the count would be, which reads as 45 to 69 for
+# Java 1.1 through Java 25, so the bound also happens to reject those outright.
+_MAX_SLICES = 32
+
+_FAT_HEADER = 8
+
 
 def detect_format(head: bytes) -> str | None:
     """The format, from the first bytes, or None when nothing matches.
 
     A fat Mach-O archive starts with 0xcafebabe, which is also the magic of a
-    Java class file. It is left out rather than guessed at.
+    Java class file, and eight bytes cannot tell them apart — so this declines
+    it. `is_fat_macho` reads enough of the file to settle it, and `format_of`
+    asks that question when this one has no answer.
     """
     if head.startswith(b"MZ"):
         return "PE"
@@ -47,6 +60,53 @@ def detect_format(head: bytes) -> str | None:
     return None
 
 
+def is_fat_macho(path: str | Path) -> bool:
+    """Whether the file really is a universal Mach-O archive.
+
+    The magic alone is shared with Java class files, so three things are checked
+    instead of assumed: the slice count is plausible, the first slice lies inside
+    the file, and the bytes at its offset are one of the thin Mach-O magics. A
+    class file fails on all three — its version fields read as a count of 45 or
+    more — and so does a download that stopped before the slices arrived.
+
+    Only the first slice is validated. A second wrong one would make the file
+    broken rather than make it something else, and this function answers "what is
+    this", not "is it intact".
+    """
+    try:
+        with Path(path).open("rb") as handle:
+            header = handle.read(_FAT_HEADER)
+            if len(header) < _FAT_HEADER:
+                return False
+            magic = int.from_bytes(header[:4], "big")
+            entry_size = _FAT_MAGICS.get(magic)
+            if entry_size is None:
+                return False
+
+            slices = int.from_bytes(header[4:8], "big")
+            if not 1 <= slices <= _MAX_SLICES:
+                return False
+
+            entry = handle.read(entry_size)
+            if len(entry) < entry_size:
+                return False
+            # cputype, cpusubtype, then offset and size — 4 bytes each in a
+            # fat_arch, 8 in a fat_arch_64.
+            width = 8 if entry_size == 32 else 4
+            offset = int.from_bytes(entry[8:8 + width], "big")
+            size = int.from_bytes(entry[8 + width:8 + 2 * width], "big")
+
+            end = Path(path).stat().st_size
+            least = _FAT_HEADER + entry_size * slices
+            if not size or offset < least or offset + size > end:
+                return False
+
+            handle.seek(offset)
+            return handle.read(4) in _MACHO_MAGICS
+    except OSError:
+        return False
+
+
 def format_of(path: str | Path) -> str | None:
     """The format of a file on disk, without reading the rest of it.
 
@@ -54,12 +114,22 @@ def format_of(path: str | Path) -> str | None:
     executables, and opening eight bytes is the cheapest way to tell which is
     which. A file that cannot be opened is not a format this tool declines —
     it is nothing at all, so None covers both.
+
+    The one format that costs more than eight bytes is a universal Mach-O, and
+    only for a file that starts with the ambiguous magic: see `is_fat_macho`.
     """
     try:
         with Path(path).open("rb") as handle:
-            return detect_format(handle.read(_MAGIC_LENGTH))
+            head = handle.read(_MAGIC_LENGTH)
     except OSError:
         return None
+
+    fmt = detect_format(head)
+    if fmt is not None:
+        return fmt
+    if int.from_bytes(head[:4], "big") in _FAT_MAGICS and is_fat_macho(path):
+        return "MachO"
+    return None
 
 
 def scan(path: str | Path) -> ExeResult:
@@ -73,10 +143,10 @@ def scan(path: str | Path) -> ExeResult:
 
     result = ExeResult(path=str(path), size=size, sha256=digest)
 
-    with path.open("rb") as handle:
-        head = handle.read(_MAGIC_LENGTH)
-
-    fmt = detect_format(head)
+    # Through format_of, so that `scan` and the directory walk agree on what a
+    # file is: they used to detect it separately and only one of them learned
+    # about universal archives.
+    fmt = format_of(path)
     if fmt is None:
         result.error = "unrecognised format: not a PE, ELF or Mach-O binary"
         return result

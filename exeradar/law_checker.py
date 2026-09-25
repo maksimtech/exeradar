@@ -117,9 +117,35 @@ HARDCODED_IP_NOTE = (
     "address before treating it as an endpoint"
 )
 
+# Printed instead of the finding when the addresses are there and the means to
+# use them is not. "Imports no network function" and "does not use the network"
+# are different statements: a packed installer can resolve ws2_32 at run time
+# through LoadLibrary, and this says only what the import table shows.
+ADDRESSES_WITHOUT_NETWORK_NOTE = (
+    "addresses were found but the binary imports no network function, so they are "
+    "reported as strings and not as endpoints — driver installers carry their "
+    "version number in this shape (23.110.0.5 is a valid address and a real "
+    "driver version). A packed binary can still resolve network APIs at run time"
+)
+
 # How a program binds, not somewhere it calls.
 _UNSPECIFIED = "0.0.0.0"
 _LOOPBACK = "127."
+
+
+def reaches_the_network(result: ExeResult) -> bool:
+    """Whether the import table shows any way of contacting an address.
+
+    Delegated to `pe.categorise`, which is where this judgement already lives —
+    the same table that decides what the console prints beside each import. One
+    rule in one place: a DLL added there is understood here too.
+    """
+    from exeradar.formats import pe
+
+    return any(
+        "network" in pe.categorise(imported.dll, imported.functions)
+        for imported in result.imports
+    )
 
 # Certificates and countersignatures are stored as text by the model; these are
 # the two shapes signature.py writes.
@@ -184,8 +210,14 @@ def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, 
                     f"{leaf.subject} expired on {leaf.valid_to}, with no RFC3161 countersignature"
                 ]
 
+    # Only for a binary that could contact one. Five of fourteen driver
+    # installers measured on 2026-09-24 were reported over their own version
+    # number — 10.1.15.6, 2.07.1.23, 23.60.0.1, 2.25.100.3, 23.110.0.5 — and a
+    # finding that fires on every driver installer is one the reader learns to
+    # skip. The addresses remain in the report as facts; see
+    # ADDRESSES_WITHOUT_NETWORK_NOTE for what is said instead.
     addresses = [ip for ip in result.strings.ips if not _is_local(ip)]
-    if addresses:
+    if addresses and reaches_the_network(result):
         found["hardcoded_ip"] = addresses
 
     return found
@@ -237,6 +269,10 @@ def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
         notes.append(GDPR_SCOPE_NOTE)
     if "hardcoded_ip" in found:
         notes.append(HARDCODED_IP_NOTE)
+    elif any(not _is_local(ip) for ip in result.strings.ips):
+        # Addresses were seen and deliberately not raised. Saying nothing would
+        # be indistinguishable from not having looked.
+        notes.append(ADDRESSES_WITHOUT_NETWORK_NOTE)
     return notes
 
 

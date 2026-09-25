@@ -75,6 +75,55 @@ def signed_pe_path() -> Path:
     pytest.skip("no embedded-signed PE available")
 
 
+# The data directory that holds the Authenticode blob: index 4 of the optional
+# header's directory array, which is the one PE directory whose first field is a
+# file offset and not an RVA.
+_SECURITY_DIRECTORY = 4
+_PE32_PLUS = 0x20B
+
+
+def _security_directory_offset(data: bytes) -> int:
+    """Where the certificate table entry sits in the file."""
+    import struct
+
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    magic = struct.unpack_from("<H", data, e_lfanew + 24)[0]
+    fixed = 112 if magic == _PE32_PLUS else 96   # PE32+ / PE32 optional header
+    return e_lfanew + 24 + fixed + _SECURITY_DIRECTORY * 8
+
+
+@pytest.fixture
+def unsigned_pe_path(signed_pe_path, tmp_path) -> Path:
+    """A PE that parses and carries no signature, from one that does.
+
+    Zeroing the certificate table entry is the whole change: every header stays
+    consistent, LIEF reads the file, and `signatures` is empty — which is what
+    "both paths ran and found nothing" needs in order to mean anything. A file
+    of `MZ` and zeros cannot say that: it says nothing could be read.
+    """
+    import struct
+
+    data = bytearray(signed_pe_path.read_bytes())
+    struct.pack_into("<II", data, _security_directory_offset(data), 0, 0)
+
+    target = tmp_path / "unsigned.exe"
+    target.write_bytes(bytes(data))
+    return target
+
+
+@pytest.fixture
+def truncated_pe_path(signed_pe_path, tmp_path) -> Path:
+    """The first 4 KB of a signed binary: an interrupted download.
+
+    Its headers still say where the certificate table is, and the file ends long
+    before that. Nothing about the signature can be concluded, which is exactly
+    the distinction the tool exists to keep.
+    """
+    target = tmp_path / "truncated.exe"
+    target.write_bytes(signed_pe_path.read_bytes()[:4096])
+    return target
+
+
 @pytest.fixture(scope="session")
 def catalog_pe_path() -> Path:
     """A PE with no embedded signature that Windows still trusts — path B."""
