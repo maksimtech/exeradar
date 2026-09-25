@@ -48,9 +48,6 @@ CAPABILITY = {
 }
 
 KNOWN_GAPS = {
-    # codspeed measures benchmarks and this repository has none. A workflow that
-    # measures nothing is worse than its absence: it reports success.
-    "codspeed",
     # docker.yml publishes an image to Docker Hub on every tag, and
     # maksimtech/exeradar does not exist there — checked on 2026-09-26, 404
     # against 200 for the other four Radar. Starting to publish is a decision
