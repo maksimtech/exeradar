@@ -12,6 +12,7 @@ pinned here rather than left to whatever asdict() happens to produce.
 
 from __future__ import annotations
 
+import copy
 import json
 
 import pytest
@@ -136,7 +137,31 @@ def test_an_errored_result_still_produces_json(result):
 
 
 def test_json_is_stable_across_calls(result):
-    assert report.to_json(result) == report.to_json(result)
+    """Serialising twice gives the same bytes.
+
+    What it guards is a clock or an address reaching the output: both would make
+    the second call differ from the first. It used to be written as
+    `to_json(result) == to_json(result)`, which does test that and reads like a
+    tautology — the first call is kept in a name so the assertion says what it
+    compares.
+    """
+    first = report.to_json(result)
+
+    assert report.to_json(result) == first
+
+
+def test_equal_results_serialise_identically(result):
+    """The property the test above cannot reach: same data, same JSON.
+
+    Two distinct objects holding the same facts. This is what catches an identity
+    leaking into the output — an id(), a repr with an address, a path object's
+    memory-dependent hash — because there two calls on one object agree with each
+    other and disagree with an equal object.
+    """
+    twin = copy.deepcopy(result)
+
+    assert twin is not result
+    assert report.to_json(twin) == report.to_json(result)
 
 
 # --------------------------------------------------------------------------

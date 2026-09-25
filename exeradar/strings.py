@@ -46,7 +46,19 @@ _URL = re.compile(rf"""{_SCHEME}(?:(?!{_SCHEME})[^\s\x00"'<>`\\])+""", re.I)
 _DER_TAIL = re.compile(r"0[\x20-\x7e]?$")
 
 _IPV4 = re.compile(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$")
-_WINDOWS_PATH = re.compile(r"^[a-z]:[\\/][^\r\n]*[\\/][^\r\n]*$", re.I)
+# A segment cannot contain a separator, and the separator lives only in the
+# repeated group: every character has exactly one place it can go, so there is
+# nothing for the engine to reconsider. Written the obvious way —
+# `[^\r\n]*[\\/][^\r\n]*` — both halves can swallow separators, so each one in
+# the string is a candidate for the middle and every attempt rescans the tail.
+# Measured through classify() on 2026-09-25, with a carriage return partway
+# through "C:\\" + "a\\" * n: 26 ms at n=1,000, 502 ms at n=4,000, 2.9 s at
+# n=8,000. This form does the last of those in a few milliseconds.
+#
+# extract_raw cannot produce such a string — it yields runs of [\x20-\x7e], so
+# no CR or LF — but classify() and from_file() are public, and a caller with its
+# own strings is not a strange thing.
+_WINDOWS_PATH = re.compile(r"^[a-z]:[\\/][^\\/\r\n]*(?:[\\/][^\\/\r\n]*)+$", re.I)
 _UNIX_PATH = re.compile(r"^/[\w.\-]+(/[\w.\-]+)+/?$")
 _HOST = re.compile(
     r"^(?=.{4,253}$)"
