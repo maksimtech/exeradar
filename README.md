@@ -1,5 +1,7 @@
 # ExeRadar
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/maksimtech/exeradar?utm_source=badge)
+
 Static analysis of executables: PE first, ELF and Mach-O after. Headers,
 imports, readable strings, code signing.
 
