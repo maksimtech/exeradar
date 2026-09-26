@@ -75,3 +75,23 @@ permits reuse — including for commercial purposes — provided the source is
 acknowledged and the meaning is not distorted. Only the authentic text
 published in the *Official Journal of the European Union* has legal value;
 these excerpts are test data and nothing in this repository is legal advice.
+
+## `tests/fixtures/canon_countersignature.der`
+
+The PKCS#7 signature blob of `MF440SeriesMFDriverV6604WP.exe`, a printer driver
+Canon publishes for free download. 7,560 bytes lifted out of a 308 MB installer
+that is not in this repository, with SHA-256
+`4efcc9abae41b5a4885897d654526038db6649a9115777e1002249b84089917e`; the
+installer it came from is
+`a5eaf8b8c597e792626e4d2b8c15cdeeed07f211fa922ce64ad1537948c170e7`.
+
+It is here because Authenticode countersigns in two forms and this package read
+only one: on 2026-09-26 two Canon drivers reported no timestamp while Windows
+read `CN=DigiCert Timestamp 2021` from the same bytes. The blob is the smaller
+form — a `counter_signature` attribute rather than an RFC3161 token — and a
+structure described in a comment is a structure nobody checked.
+
+What it contains is public: X.509 certificates, which are published by design,
+and a signature over bytes that are not in this repository. It carries no key
+and no part of Canon's program. It is test data, it is not redistributed as a
+driver, and nothing here is an endorsement by or an association with Canon Inc.

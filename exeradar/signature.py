@@ -261,22 +261,38 @@ def _timestamp(path: Path) -> tuple[str | None, str | None, str | None]:
     file.
     """
     try:
-        from asn1crypto import cms, tsp
+        from asn1crypto import cms
 
         binary = lief.PE.parse(str(path))
         if binary is None or not binary.signatures:
             return None, None, None
 
-        content = cms.ContentInfo.load(bytes(binary.signatures[0].raw_der))
-        signer = content["content"]["signer_infos"][0]
-        tokens = [
-            attribute for attribute in signer["unsigned_attrs"]
-            if attribute["type"].native == "microsoft_time_stamp_token"
-        ]
-        if not tokens:
-            return None, None, None
+        return timestamp_of(cms.ContentInfo.load(bytes(binary.signatures[0].raw_der)))
+    except Exception as exc:  # noqa: BLE001 - reported, not hidden
+        return None, None, f"{type(exc).__name__}: {exc}"
 
-        signed = tokens[0]["values"][0]["content"]
+
+def timestamp_of(content) -> tuple[str | None, str | None, str | None]:
+    """The signing time and its authority, whichever form the file used.
+
+    Authenticode countersigns in two ways and this package looked for one of
+    them. Two Canon printer drivers came back with no timestamp on 2026-09-26
+    while Windows read `CN=DigiCert Timestamp 2021` out of the same bytes: they
+    use the older PKCS#9 form, a whole SignerInfo in an unsigned attribute
+    called `counter_signature`, and the RFC3161 token this looked for was
+    simply not there. "No timestamp" was returned as a fact about the file when
+    it was a form nobody had looked for — and a signature whose time cannot be
+    read stops being verifiable the day its certificate expires, so the two
+    answers are not close to each other.
+    """
+    from asn1crypto import tsp
+
+    signer = content["content"]["signer_infos"][0]
+    unsigned = {attribute["type"].native: attribute for attribute in signer["unsigned_attrs"]}
+
+    token = unsigned.get("microsoft_time_stamp_token")
+    if token is not None:
+        signed = token["values"][0]["content"]
         info = tsp.TSTInfo.load(signed["encap_content_info"]["content"].contents)
         when = info["gen_time"].native
         return (
@@ -284,8 +300,47 @@ def _timestamp(path: Path) -> tuple[str | None, str | None, str | None]:
             _authority(signed),
             None if when else "the token carried no gen_time",
         )
-    except Exception as exc:  # noqa: BLE001 - reported, not hidden
-        return None, None, f"{type(exc).__name__}: {exc}"
+
+    counter = unsigned.get("counter_signature")
+    if counter is not None:
+        return _countersigned(counter["values"][0], content)
+
+    return None, None, None
+
+
+def _countersigned(counter, content) -> tuple[str | None, str | None, str | None]:
+    """The PKCS#9 form: a SignerInfo over the outer signature.
+
+    Its time is an ordinary `signing_time` signed attribute. Its certificate is
+    not bundled with it — it is named by issuer and serial and has to be found
+    among the ones the outer signature already carries, which is why the
+    timestamper used to end up in the chain looking like any other certificate.
+    """
+    times = [
+        attribute for attribute in counter["signed_attrs"]
+        if attribute["type"].native == "signing_time"
+    ]
+    when = times[0]["values"][0].native if times else None
+    return (
+        f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+        _named_certificate(counter["sid"], content),
+        None if when else "the countersignature carried no signing_time",
+    )
+
+
+def _named_certificate(sid, content) -> str | None:
+    """The certificate a signer identifier points at, out of the ones present."""
+    if sid.name != "issuer_and_serial_number":
+        return None
+    issuer = sid.chosen["issuer"]
+    serial = sid.chosen["serial_number"].native
+    for wrapped in content["content"]["certificates"]:
+        certificate = wrapped.chosen
+        if getattr(certificate, "serial_number", None) != serial:
+            continue
+        if certificate.issuer == issuer:
+            return certificate.subject.human_friendly
+    return None
 
 
 def _authority(signed) -> str | None:
