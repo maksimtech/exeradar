@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from exeradar.models import Strings
+from exeradar.tlds import TLDS
 
 MIN_LENGTH = 4
 
@@ -141,6 +142,11 @@ def classify(candidates: Iterable[str]) -> Strings:
     Each string lands in at most one bucket: a URL is not also reported as the
     host inside it, because one string making two claims reads as two findings.
     """
+    # Materialised: the version pass reads every candidate before the
+    # classification pass does, and a generator cannot be read twice.
+    candidates = list(candidates)
+    declared_versions = _versions_declared_in(candidates)
+
     urls: set[str] = set()
     ips: set[str] = set()
     hosts: set[str] = set()
@@ -156,7 +162,8 @@ def classify(candidates: Iterable[str]) -> Strings:
             urls.update(found_urls)
             continue
         if _is_ipv4(text):
-            ips.add(text)
+            if text not in declared_versions:
+                ips.add(text)
             continue
         if _WINDOWS_PATH.match(text) or _UNIX_PATH.match(text):
             paths.add(text)
@@ -212,6 +219,31 @@ def _trim(found: str) -> str:
     return found
 
 
+# `FileVersion=1.1.2.0`, `Katana, Version=1.1.8.0, Culture=neutral`. No \b
+# before the word: in `FileVersion` there is no boundary between `e` and `V`,
+# and that spelling is the common one in a PE.
+_DECLARED_VERSION = re.compile(r"version\s*[=:]?\s*(\d{1,3}(?:\.\d{1,3}){3})", re.I)
+
+
+def _versions_declared_in(candidates: list[str]) -> set[str]:
+    """Dotted quads this file names as versions somewhere in its own bytes.
+
+    A quad alone cannot be told from an address — `_is_ipv4` has said so since
+    it was written, and it is right. But a file that carries `1.1.8.0` on its
+    own in the .NET metadata *and* `Katana, Version=1.1.8.0, Culture=neutral`
+    a few kilobytes away has answered the question itself. Four Kyocera
+    installers reported exactly that as an IP address on 2026-09-26.
+
+    Corroboration inside one file, not a rule about shape: a quad nothing
+    explains is still reported, because nothing established what it is.
+    """
+    return {
+        match.group(1)
+        for text in candidates
+        for match in _DECLARED_VERSION.finditer(text)
+    }
+
+
 def _is_ipv4(text: str) -> bool:
     """Four octets in range.
 
@@ -228,17 +260,33 @@ def _is_ipv4(text: str) -> bool:
 def _is_host(text: str) -> bool:
     """A hostname, and not one of the many things shaped like one.
 
-    Two rules beyond the pattern. The suffix must not be a file extension,
-    which is what separates example.com from kernel32.dll. And some label
-    before the suffix must be at least two characters: `g.iG` came out of the
-    certificate bytes of the test fixture, and a one-character label with a
-    two-character suffix is noise far more often than it is a host. That costs
-    the rare real `x.co`, which is the cheaper of the two errors.
+    Three rules beyond the pattern.
+
+    The suffix must be a top-level domain IANA actually delegates. Without it,
+    every dotted identifier in a binary is a host: `Mono.Cecil` and
+    `Katana.Services` are .NET namespaces, `Newtonsoft.Json.dllPK` is a ZIP
+    member name with the archive's own signature stuck to it, and the
+    compressed payload of one 436 MiB installer produced 2,449 two-label
+    strings of which not one was real. Measured on 2026-09-26: the delegated
+    suffixes remove 1,702 of those 2,449 and every one of the namespace and
+    archive cases, and cost nothing that was ever a host.
+
+    The suffix must also not be a file extension — `com` is a TLD and was never
+    listed, but `dll` is what separates example.com from kernel32.dll.
+
+    And some label before the suffix must be at least two characters: `g.iG`
+    came out of the certificate bytes of the test fixture, and a one-character
+    label with a two-character suffix is noise far more often than it is a
+    host. That costs the rare real `x.co`, which is the cheaper of the two
+    errors.
     """
     match = _HOST.match(text)
     if not match:
         return False
-    if match.group(1).lower() in _FILE_EXTENSIONS:
+    suffix = match.group(1).lower()
+    if suffix in _FILE_EXTENSIONS:
+        return False
+    if suffix not in TLDS:
         return False
     labels = text.split(".")[:-1]
     return any(len(label) >= 2 for label in labels)
