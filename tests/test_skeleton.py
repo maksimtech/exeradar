@@ -26,7 +26,10 @@ def test_version_is_the_generation_and_this_tool_s_count():
     one generation per year — see tests/test_version_contract.py, which holds
     the rule and the reason the count could not simply carry on.
     """
-    assert re.fullmatch(r"\d{4}\.\d+", exeradar.__version__)
+    # The third segment is optional: 2026.40 is a release, 2026.40.1 a fix on
+    # top of one. tests/test_version_contract.py holds the rule and the reason
+    # a fix can never be .0.
+    assert re.fullmatch(r"\d{4}\.[1-9]\d*(\.[1-9]\d*)?", exeradar.__version__)
 
 
 def test_unsigned_and_unknown_are_distinct():

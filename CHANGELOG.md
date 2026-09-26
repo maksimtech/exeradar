@@ -7,6 +7,35 @@ and this project uses calendar versioning (YYYY.MM.N).
 
 ## [Unreleased]
 
+## [2026.40.1] - 2026-09-26
+
+### Fixed
+
+- **Strings are read from the image, not from what is glued behind it.** A
+  457 MB HP webpack reported 747 hostnames and 350 paths and not one was real:
+  `00c.Bvv`, `/-/9`, `/./G`. The cause was in the section table exeradar
+  already prints — the sections sum to 684 KB, so 99.85% of the file is
+  overlay, the bytes past the last section that the loader never maps and that
+  in a self-extracting installer are the compressed payload. Printable runs
+  pulled out of compressed data will always manufacture `xx.yy` pairs that
+  happen to end in a delegated suffix.
+
+  The overlay now joins the certificate table as a range the strings pass does
+  not read. Measured on four binaries: the webpack drops to 0 hosts and 1 path,
+  and two Kyocera installers and the test fixture do not move at all — their
+  overlays are the signature and nothing else. The one path left on the webpack
+  is the build path of its 7-Zip SFX stub, which was always there under the
+  noise. The scan also went from 135 seconds to 9.
+
+  How much was skipped is on the result and in the report. Leaving most of a
+  file unread is defensible; doing it without saying so is not.
+
+### Added
+
+- **`exeradar --version`**, which the other four Radar had and this one did
+  not, so the version had to be read out of `pip list`. It comes from
+  `exeradar.__version__` rather than a literal.
+
 ## [2026.40] - 2026-09-26
 ### Changed
 
