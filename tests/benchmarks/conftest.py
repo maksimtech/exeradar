@@ -18,7 +18,7 @@ import pytest
 
 from exeradar import scanner, signature, strings
 
-FIXTURE = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "python.exe"
+FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "python.exe"
 
 
 @pytest.fixture(scope="session")

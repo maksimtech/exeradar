@@ -27,7 +27,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install --group dev -e .
       - name: Run test suite
-        run: pytest tests/ -v --cov=exeradar --cov-report=xml --cov-report=term-missing
+        # --ignore=tests/benchmarks: they need pytest-codspeed, which
+        # codspeed.yml installs and this workflow deliberately does not.
+        run: >-
+          pytest tests/ -v --ignore=tests/benchmarks
+          --cov=exeradar --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         # Once, not once per matrix entry: the same report four times is four

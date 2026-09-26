@@ -6,7 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'exeradar/**'
-      - 'benchmarks/**'
+      - 'tests/**'
       - 'pyproject.toml'
   workflow_dispatch:
 permissions:
@@ -34,4 +34,4 @@ jobs:
         uses: CodSpeedHQ/action@v5
         with:
           mode: simulation
-          run: pytest benchmarks/ --codspeed
+          run: pytest tests/benchmarks --codspeed
