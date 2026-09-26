@@ -7,6 +7,93 @@ and this project uses calendar versioning (YYYY.MM.N).
 
 ## [Unreleased]
 
+## [2026.40] - 2026-09-26
+### Changed
+
+- **Baseline: the five Radar restart from a common number.** They had drifted to
+  .32, .12, .11, .6 and .3 of the same generation, which left the shared part of
+  the version meaning nothing at all. The highest count in the suite was taken,
+  rounded up for headroom, and every Radar starts again from 2026.40 — a jump
+  for most of them, and a number that means the same thing in all five.
+
+  From here the count belongs to each Radar again, and something urgent gets a
+  third segment on top: 2026.40.1 before 2026.41, the way a suite has always
+  done it. 2026 is a settling year; from 2027 the count moves when the code
+  moves.
+
+
+### Fixed
+
+- **Four findings that named the wrong thing.** A version number is not an
+  endpoint: five of fourteen Lenovo driver installers were reported with
+  `hardcoded_ip`, and all five addresses were the version of the driver inside —
+  `10.1.15.6`, `2.07.1.23`, `23.60.0.1`, `2.25.100.3`, `23.110.0.5`. Three are
+  formally valid public addresses, so no octet rule separates them from the real
+  thing; what does is that none of those files imports a single network function.
+  The finding now requires that capability. The addresses stay in the report as
+  facts, with a note saying why nothing was raised — "imports no network
+  function" is an observation and not a conclusion, since a packed binary can
+  resolve `ws2_32` at run time.
+
+- **The signer is named by the PKCS#7, not by the position of a certificate in
+  the list.**
+
+- **A path pattern that stops backtracking.** `_WINDOWS_PATH` was written so that
+  two segments could each swallow a separator, which makes every separator in the
+  string a candidate for the middle one and rescans the tail for each: measured
+  through `classify()`, 26 ms at n=1,000 and 2.9 s at n=8,000 — quadruple the
+  input, multiply the time by nineteen. A segment can no longer contain a
+  separator, so every character has exactly one place it can go. The same twelve
+  paths and non-paths are recognised.
+
+- **Five type errors that only appear with the dependencies installed.** Among
+  them, lief types a section or import name as `str | bytes` and returns `bytes`
+  for a name whose bytes are not valid UTF-8 — which would have reached both the
+  console report and the JSON output as `b'.text'`, quoted prefix and all.
+
+- **A dotted quad the file itself calls a version is no longer reported as an
+  IP address.** Four Kyocera installers listed `1.1.2.0`, `1.1.8.0`, `1.1.3.0`
+  and `2.1.7.0` among their addresses. Each appears twice in its binary: once
+  alone in the .NET metadata, where strings are length-prefixed, and once
+  inside `Katana, Version=1.1.8.0, Culture=neutral`. The second occurrence is
+  the file saying what the first one is, and `classify` sees both.
+
+  Corroboration inside one file, not a rule about shape: a quad nothing
+  explains is still reported, because nothing established what it is. Three of
+  the seven survive for that reason and are named in the tests.
+
+- **A hostname's last label has to be a top-level domain that IANA actually
+  delegates.** Without that rule every dotted identifier in a binary was a
+  host: `Mono.Cecil` and `IniParser.Model` are .NET namespaces,
+  `Newtonsoft.Json.dllPK` is a ZIP member name with the archive's own signature
+  stuck to it, and the compressed payload of one 436 MiB installer produced
+  2,449 two-label strings of which not one was real. That installer now reports
+  747 — 1,702 fewer — and every namespace and archive case is gone.
+
+  The residue is named rather than hidden: `.services`, `.tools`, `.management`
+  and `.net` are real delegations, so a namespace ending in one still reads as
+  a host, and `Microsoft.NET` is the honest worst case.
+
+- **The signing time is read from both countersignature forms.** Two Canon
+  printer drivers reported no timestamp while Windows read
+  `CN=DigiCert Timestamp 2021` from the same bytes. Authenticode countersigns
+  either with an RFC3161 token or with the older PKCS#9 `counter_signature`,
+  a whole SignerInfo whose time is its own `signing_time` and whose certificate
+  is named by issuer and serial rather than bundled. Only the first was read,
+  and the second came back as "no timestamp" — stated as a fact about the file
+  rather than as a form nobody had looked for. A signature whose time cannot be
+  read stops being verifiable the day its certificate expires.
+
+### Added
+
+- **The Docker image is published.** Built from the tag rather than from PyPI, so
+  there is no propagation to wait for, and the smoke test is given the tag as
+  `EXPECTED_VERSION`: built from the checkout, the image's version comes from
+  `exeradar/__init__.py` while its Docker tag comes from git, and nothing else
+  makes those two agree.
+
+- Benchmarks for the calls a scan spends its time in, watched by CodSpeed.
+
 ## [2026.09.3] - 2026-09-24
 
 ### Fixed

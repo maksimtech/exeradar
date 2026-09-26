@@ -19,9 +19,14 @@ from exeradar.models import ExeResult, Signature, SignatureState
 runner = CliRunner()
 
 
-def test_version_is_calver():
-    """YYYY.0M.PATCH, and hatchling reads it from here to build the package."""
-    assert re.fullmatch(r"\d{4}\.\d{2}\.\d+", exeradar.__version__)
+def test_version_is_the_generation_and_this_tool_s_count():
+    """YYYY.N, and hatchling reads it from here to build the package.
+
+    The month used to sit in the middle. It left when the five Radar moved to
+    one generation per year — see tests/test_version_contract.py, which holds
+    the rule and the reason the count could not simply carry on.
+    """
+    assert re.fullmatch(r"\d{4}\.\d+", exeradar.__version__)
 
 
 def test_unsigned_and_unknown_are_distinct():
