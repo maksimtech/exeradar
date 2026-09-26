@@ -47,16 +47,12 @@ CAPABILITY = {
     or (ROOT / "benchmarks").is_dir(),
 }
 
-KNOWN_GAPS = {
-    # docker-scout scans maksimtech/exeradar:latest on Docker Hub. Checked on
-    # 2026-09-26: the repository answers 404 there, while the other four Radar
-    # answer 200 — docker.yml exists now but has never run, so there is no image
-    # to scan. Porting it today would give this repository a security workflow
-    # whose every run passes because it finds nothing, which is the one failure
-    # this package is written to tell apart from the others. It goes in after
-    # the first tag publishes an image.
-    "docker-scout",
-}
+# Empty, and it took until 2026.40 to get there. The last entry was
+# docker-scout, which was held back because maksimtech/exeradar answered 404 on
+# Docker Hub: a CVE scan pointed at an image that does not exist passes every
+# run by finding nothing, which is the one failure this package is written to
+# tell apart from the others. The image exists now, so the workflow does too.
+KNOWN_GAPS: set[str] = set()
 
 
 def present(name: str) -> bool:
