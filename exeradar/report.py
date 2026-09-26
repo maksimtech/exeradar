@@ -88,6 +88,10 @@ def to_markdown(result: ExeResult) -> str:
     lines += [
         f"- **Format:** {result.format} {result.arch or ''}".rstrip(),
         f"- **Size:** {result.size:,} bytes",
+        *(
+            [f"- **Overlay:** {result.overlay:,} bytes past the last section, not read"]
+            if result.overlay else []
+        ),
         f"- **SHA-256:** `{result.sha256}`",
         f"- **Built:** {result.built or 'not stated'}",
         "",
@@ -168,6 +172,14 @@ def to_console(result: ExeResult, console: Console | None = None) -> None:
         f"built {result.built or 'not stated'}"
     )
     console.print(f"  sha256 [dim]{result.sha256}[/dim]")
+    if result.overlay:
+        # Said rather than skipped quietly. On a self-extracting installer this
+        # is most of the file, and a reader who does not know it was left out
+        # will read "no hosts" as a fact about the program.
+        console.print(
+            f"  [dim]overlay {result.overlay:,} bytes past the last section, "
+            f"not read for strings[/dim]"
+        )
     console.print()
 
     signature = result.signature

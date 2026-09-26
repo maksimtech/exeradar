@@ -102,6 +102,39 @@ def _as_text(name: str | bytes) -> str:
         return name.decode("utf-8", errors="replace")
     return name
 
+def overlay_start(path: str | Path) -> int | None:
+    """Where the mapped image ends and appended data begins.
+
+    Everything past the last section is overlay: the loader never maps it, and
+    in a self-extracting installer it is the compressed payload. A 457 MB HP
+    webpack measured on 2026-09-26 was 99.85% overlay — 684 KB of sections and
+    456 MB of archive — and every one of the 747 hostnames and 350 paths pulled
+    out of it was manufactured by reading printable runs out of compressed
+    bytes.
+
+    None when the boundary cannot be established, which is the answer that
+    matters: a truncated or malformed PE has no last section, and returning
+    zero there would exclude the entire file and report the silence as a
+    finding.
+    """
+    try:
+        binary = lief.PE.parse(str(path))
+    except Exception:  # noqa: BLE001 - any parse failure is the same answer
+        return None
+    if binary is None or not binary.sections:
+        return None
+    end = max(section.offset + section.size for section in binary.sections)
+
+    # A truncated file keeps its original headers, so LIEF reports sections
+    # ending where they were meant to: 92,160 for the first 4 KB of the test
+    # fixture. A boundary past the end of the file is not a boundary, and
+    # answering with one would be worse than answering with nothing.
+    size = Path(path).stat().st_size
+    if not end or end > size:
+        return None
+    return end
+
+
 def entropy(data: bytes) -> float:
     """Shannon entropy in bits per byte, 0.0 to 8.0.
 

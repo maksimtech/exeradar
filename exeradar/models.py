@@ -102,4 +102,8 @@ class ExeResult:
     strings: Strings = field(default_factory=Strings)
     signature: Signature = field(default_factory=Signature)
     findings: list[Finding] = field(default_factory=list)
+    # Bytes past the last section, which the strings pass did not read. Kept on
+    # the result so the report can say what was skipped instead of skipping it
+    # quietly.
+    overlay: int = 0
     error: str | None = None

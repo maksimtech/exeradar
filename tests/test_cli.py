@@ -255,3 +255,22 @@ def test_verify_agrees_with_windows_about_a_system_binary(catalog_pe_path):
 
     assert outcome.exit_code == 0
     assert "catalog" in outcome.stdout
+
+
+def test_version_option_prints_the_package_version():
+    """Reported missing from real use on 2026-09-26: the other four Radar all
+    answer `--version` and this one did not, so the version had to be read out
+    of `pip list`. It comes from `exeradar.__version__` rather than a literal,
+    which is the thing worth pinning — a hardcoded copy drifts the first time
+    someone releases without touching the CLI.
+    """
+    from typer.testing import CliRunner
+
+    import exeradar
+    from exeradar.cli import app
+
+    result = CliRunner().invoke(app, ["--version"])
+
+    assert result.exit_code == 0, result.output
+    assert exeradar.__version__ in result.output
+    assert "ExeRadar" in result.output

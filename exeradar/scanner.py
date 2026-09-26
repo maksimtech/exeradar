@@ -165,10 +165,24 @@ def scan(path: str | Path) -> ExeResult:
     # The signature and the strings are independent of the format parser and
     # of each other, so neither failing should cost the other its output.
     result.signature = signature.inspect(path)
-    # The certificate table is skipped: its URLs and names describe whoever
-    # signed the file, not what the file does, and on a signed binary they
-    # outnumber the program's own by an order of magnitude.
-    result.strings = strings.from_file(path, exclude=signature.signed_regions(path))
+    # Two ranges are skipped, for the same reason in two sizes.
+    #
+    # The certificate table: its URLs and names describe whoever signed the
+    # file, not what the file does, and on a signed binary they outnumber the
+    # program's own by an order of magnitude.
+    #
+    # The overlay: everything past the last section, which the loader never
+    # maps. In a self-extracting installer that is the compressed payload, and
+    # printable runs pulled from compressed bytes are not strings — they are
+    # pairs of characters that happen to look like hostnames. One 457 MB
+    # webpack produced 747 of them and not one was real.
+    excluded = list(signature.signed_regions(path))
+    start = pe.overlay_start(path)
+    if start is not None:
+        result.overlay = max(size - start, 0)
+        if result.overlay:
+            excluded.append((start, size))
+    result.strings = strings.from_file(path, exclude=excluded)
 
     # Last, because every finding is drawn from the facts above. Imported here
     # rather than at the top so that reading a file does not pull in the law
