@@ -33,6 +33,13 @@
 # image; a pin could not reach them, because the vulnerable copies live under
 # `pip/_vendor/` and an explicit install adds a second, patched copy beside them.
 # These three close when the next image is published and not before.
+#
+# That the fix works is no longer an expectation. In docker-build-check.yml run
+# 36587553929, on 2026-09-29, tests/docker/inspect.sh reported pip, setuptools and
+# wheel all absent from the image built out of this repository, found no
+# `pip/_vendor/bom.cdx.json` left anywhere in it, and counted 87 packages — with
+# the smoke test and the CLI still passing, which is the part a removal like this
+# could have broken.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[exception]]
@@ -103,9 +110,17 @@ why = """
 Open in all four suites, including sid — Debian bug 1148455, nothing scheduled. \
 Scout names the *source* package `perl`, which in Debian produces both the \
 removable `perl` and `perl-base`, which is Essential and which dpkg itself \
-depends on. Measured inside the built patchradar image on 2026-09-29 by its \
-tests/docker/inspect.sh, only `perl-base` is installed; this image uses the same \
-base, so the finding is ours to record and not ours to close.
+depends on.
+
+Measured in *this* image on 2026-09-29, by tests/docker/inspect.sh in \
+docker-build-check.yml run 36587553929: the only real package is `perl-base` \
+5.40.1-6+deb13u1, essential=yes priority=required. `perl`, `perl-modules`, \
+`perlapi-5.40.0` and `perlapi-5.40.1` appear in dpkg-query output with no version \
+and no priority — they are virtual packages that perl-base provides, not installs \
+of their own. The full `perl` is not here, so there is nothing to remove.
+
+So the finding is ours to record and not ours to close. The date is for re-reading \
+whether Debian has published a fix, not for trying the removal again.
 """
 review_by = "2026-12-31"
 
