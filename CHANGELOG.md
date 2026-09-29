@@ -3,9 +3,69 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project uses calendar versioning (YYYY.MM.N).
+and this project uses **CalVer, Apple style**: `YYYY.count[.fix]`, not SemVer.
+`YYYY` is the generation, shared by the five Radar; the count belongs to each of
+them and moves when its code moves; the third segment is for something urgent on
+what has already shipped. The line above said `YYYY.MM.N` until 2026-09-29, which
+no version in this file has ever matched — 40 is not a month, and
+`tests/test_version_contract.py` has been enforcing the real form all along.
 
 ## [Unreleased]
+
+Nothing here changes the Python package, and `tests/test_version_contract.py`
+is right to refuse a version for it: no file under `exeradar/` has moved since
+v2026.40.1. What changed is the image and the pipeline. The image is
+republished by dispatching `docker.yml` with the current version, which is
+what closes the three vendored CVEs — a new tag would claim a package change
+that did not happen.
+
+### Fixed
+
+- **The runtime image no longer carries the build tooling.** Docker Scout reported
+  CVE-2025-47273, CVE-2026-57585 and GHSA-6v7p-g79w-8964 against
+  `pip/_vendor/bom.cdx.json` — copies vendored *inside* pip and setuptools, at a
+  path no dependency of this project can influence. Pinning cannot reach them: an
+  explicit install of a patched msgpack adds a second copy beside the first and
+  leaves the one the scanner reads exactly where it was. patchradar spent a month
+  with pins in place and the same three findings open before that became clear.
+
+  A runtime image needs none of the three: the entrypoint is `exeradar`, and
+  neither lief, asn1crypto, typer, rich nor httpx imports `pkg_resources` —
+  checked rather than assumed. Verified by building the image in
+  `docker-build-check.yml`, which publishes nothing: pip, setuptools and wheel all
+  absent, no `pip/_vendor/bom.cdx.json` anywhere, 87 packages, and the smoke test
+  and CLI still passing — which is the part a removal like this could have broken.
+
+  The three alerts close when the next image reaches Docker Hub, because that is
+  what Scout reads, not the image CI builds.
+
+- **The SonarCloud workflow ran the benchmarks and died on them.** It had been
+  failing since at least 2026-09-26, and not on the quality gate: `pytest tests/`
+  includes `tests/benchmarks`, whose nineteen tests need the `benchmark` fixture
+  that only `codspeed.yml` installs. All nineteen errored and the workflow ended
+  before the scan, with 571 tests passing in the same run. Benchmarks are excluded
+  here now, as in three of the other four Radar — a timing measured under coverage
+  instrumentation means nothing anyway.
+
+### Added
+
+- **A CI gate that refuses.** Every other security workflow reports: `snyk.yml`
+  carries `continue-on-error`, CodeQL and Docker Scout upload SARIF, and
+  SonarCloud decides its quality gate after the job has already succeeded. On
+  2026-09-29 all of them were green while nine high-severity alerts were open.
+  `security-posture.yml` reads what they published and fails when a blocking
+  finding has nobody's name against it; `SECURITY-EXCEPTIONS.toml` records the
+  accepted ones with a reason and a review date. `sonarcloud.yml` now waits for
+  its own quality gate, without which a red gate is a green job.
+
+- **`tests/docker/inspect.sh` prints what the image contains** instead of leaving
+  it to be remembered. It settles the two claims the exceptions record rests on:
+  that the build tooling is gone, and that only `perl-base` is installed —
+  Essential, which dpkg itself depends on, so CVE-2026-82560 is ours to record and
+  not ours to close. `perl`, `perl-modules` and the two `perlapi` entries come
+  back from dpkg-query with no version at all: virtual packages perl-base
+  provides, not installs. That measurement had been borrowed from patchradar's
+  image and is now taken in this one.
 
 ## [2026.40.1] - 2026-09-26
 
