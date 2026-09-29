@@ -1,0 +1,172 @@
+# Findings that are open, known, and accepted for now — each with a reason and a
+# date. `.github/workflows/security-posture.yml` reads this file: an open high or
+# critical alert with no entry here fails the build, an entry past its
+# `review_by` fails the build, and an entry that no longer matches anything fails
+# the build too, so the record cannot drift away from the product.
+#
+# The rule this file exists to serve: block on everything we can fix, never block
+# on an upstream flaw with no fix available — but write down why, and when that
+# will be looked at again.
+#
+# Fields: id, where, why, review_by are required. `source` narrows an entry to one
+# scanner; `path` narrows it to one file, which matters for a rule that can fire
+# anywhere — an entry for a CodeQL rule without a path would excuse the next real
+# occurrence of it somewhere else.
+#
+# Written on 2026-09-29 against the nine blocking alerts GitHub then held for this
+# repository.
+#
+# Three of them are fixed and still listed, which is worth understanding before
+# reading them as accepted risk. CVE-2025-47273, CVE-2026-57585 and
+# GHSA-6v7p-g79w-8964 were reported against `pip/_vendor/bom.cdx.json` — copies
+# vendored inside the build tooling, which a pin cannot reach. The Dockerfile now
+# removes pip, setuptools and wheel after the install, the fix patchradar proved
+# on 2026-09-29. But docker-scout.yml scans `maksimtech/exeradar:latest` from
+# Docker Hub, not the image built in CI, so these three close when the next image
+# is published and not when the Dockerfile changed. Their dates are short for
+# exactly that reason: if they are still here afterwards, either the publish did
+# not happen or the fix did not work, and both are worth a build failing over.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Copies vendored inside pip and setuptools in the *published* image. Fixed in
+# the Dockerfile on 2026-09-29 by removing the build tooling from the runtime
+# image; a pin could not reach them, because the vulnerable copies live under
+# `pip/_vendor/` and an explicit install adds a second, patched copy beside them.
+# These three close when the next image is published and not before.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[exception]]
+id = "CVE-2025-47273"
+source = "Docker Scout"
+where = "setuptools, vendored in the published image (pip/_vendor/bom.cdx.json)"
+why = "Fixed in the Dockerfile on 2026-09-29; closes when the next image is published."
+review_by = "2026-10-31"
+
+[[exception]]
+id = "CVE-2026-57585"
+source = "Docker Scout"
+where = "msgpack, vendored in pip inside the published image"
+why = "Fixed in the Dockerfile on 2026-09-29; closes when the next image is published."
+review_by = "2026-10-31"
+
+[[exception]]
+id = "GHSA-6v7p-g79w-8964"
+source = "Docker Scout"
+where = "msgpack, vendored in pip inside the published image"
+why = "The same msgpack copy as CVE-2026-57585, reported under its GHSA id."
+review_by = "2026-10-31"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Debian 13 (trixie) packages of the base image. `apt-get upgrade` runs at build
+# time and the image is rebuilt at every release, so a fix Debian ships arrives
+# here without anyone chasing it.
+#
+# Two different cases, which every scanner prints identically as "no fix
+# available", read out of the security tracker with `patchradar debian`:
+#
+#   zlib, perl   open in bookworm, trixie, sid and forky alike, nothing
+#                scheduled anywhere. Waiting is not a plan; the Debian bug is
+#                where evidence goes.
+#   attr, acl    already fixed in unstable, filed no-dsa for trixie *because the
+#                fix comes in a point release*. That waiting ends at a dated
+#                event: rebuild after it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[exception]]
+id = "CVE-2026-85091"
+source = "Docker Scout"
+where = "zlib 1:1.3.dfsg+really1.3.1-1, python:3.14-slim-trixie base image"
+why = """
+Debian reports no fixed version in any suite — open in bookworm, trixie, sid and \
+forky, urgency not yet assigned, Debian bug 1146895. There is nothing to wait \
+for and nothing to ask for; what moves a flaw in this state is evidence on that \
+bug.
+
+An out-of-bounds write reached through gzprintf. exeradar decompresses nothing: \
+it reads executables with LIEF and scans their bytes, and the only zlib in the \
+path is Python's own module under httpx, on responses to requests exeradar made.
+"""
+review_by = "2026-12-31"
+
+[[exception]]
+id = "SNYK-DEBIAN13-ZLIB-19520500"
+source = "Snyk Container"
+where = "zlib, python:3.14-slim-trixie base image"
+why = "The same zlib flaw as CVE-2026-85091 above, reported by the other scanner."
+review_by = "2026-12-31"
+
+[[exception]]
+id = "CVE-2026-82560"
+source = "Docker Scout"
+where = "perl-base, python:3.14-slim-trixie base image"
+why = """
+Open in all four suites, including sid — Debian bug 1148455, nothing scheduled. \
+Scout names the *source* package `perl`, which in Debian produces both the \
+removable `perl` and `perl-base`, which is Essential and which dpkg itself \
+depends on. Measured inside the built patchradar image on 2026-09-29 by its \
+tests/docker/inspect.sh, only `perl-base` is installed; this image uses the same \
+base, so the finding is ours to record and not ours to close.
+"""
+review_by = "2026-12-31"
+
+[[exception]]
+id = "SNYK-DEBIAN13-ATTR-17678182"
+source = "Snyk Container"
+where = "attr 1:2.5.2-3, python:3.14-slim-trixie base image"
+why = """
+CVE-2026-54371, and not "no fix available" as the one-line report implies: \
+Debian has fixed it in unstable and forky (attr 1:2.6.0-1) and filed it no-dsa \
+for trixie with the note "Will be fixed first in unstable, then point release \
+update; not to be backported by individual patches" — Debian bug 1141107.
+
+The fix is scheduled, not absent, so the only thing to do is rebuild after the \
+next trixie point release. The date below is set for that: if the point release \
+has happened and this is still reported, the rebuild did not happen. A symlink \
+traversal in recursive getfattr/setfattr, which exeradar never runs.
+"""
+review_by = "2026-11-30"
+
+[[exception]]
+id = "SNYK-DEBIAN13-ACL-17677866"
+source = "Snyk Container"
+where = "acl 2.3.2-2, python:3.14-slim-trixie base image"
+why = """
+CVE-2026-54369, Debian bug 1141110, in the same position as attr above: fixed in \
+unstable and forky (acl 2.4.0-1), no-dsa for trixie with the fix scheduled for a \
+point release. Debian's note says why it cannot be backported piecemeal — the \
+fix adds the `acl_*_at()` ABI of 2.4.0.
+
+A local TOCTOU in recursive setfacl/chacl; exeradar calls neither.
+"""
+review_by = "2026-11-30"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CodeQL `py/incomplete-url-substring-sanitization`, one alert. Read before being
+# written down.
+#
+# The rule fires on `"something.tld" in text`, on the assumption that a hostname
+# literal tested with `in` is a URL being checked. Here the subject is a list of
+# URLs exeradar just extracted from a PE overlay, and the assertion is that a
+# known one is among them.
+#
+# exeradar takes no decision on a hostname at all, which is what makes this a
+# misfire rather than a warning: it classifies an extracted string as a URL by
+# looking its suffix up in a frozenset of IANA TLDs — strings.py:289,
+# `if suffix not in TLDS` — which is a membership test and not a substring test.
+# The file extension case the rule would really catch was already handled there
+# on purpose; see the comment at strings.py:274.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[exception]]
+id = "py/incomplete-url-substring-sanitization"
+source = "CodeQL"
+path = "tests/test_overlay.py"
+where = "test_overlay.py:89 — asserting a URL survives the overlay scan"
+why = """
+`assert any("schemas.microsoft.com" in url for url in result.strings.urls)`. The \
+test proves that a scan which keeps the overlay also keeps the strings inside \
+it — the pair to the test above it, which would otherwise pass while dropping \
+the image. The subject is data exeradar extracted in the same test, and nothing \
+is sanitized.
+"""
+review_by = "2026-12-31"
