@@ -19,6 +19,14 @@ it would have claimed a package change that had not happened.
 
 ### Fixed
 
+- **Two advisories of 2026-09-30 are recorded.** `CVE-2026-84782` (OpenSSL, DTLS
+  retransmission, already fixed in Debian at 3.5.7-1~deb13u3 and waiting only on a
+  rebuild) and `SNYK-DEBIAN13-GCC14-20335537` / CVE-2026-102010 (open in trixie
+  with no fix in any suite, and `libstdc++6` is what LIEF is built on). The other
+  four Radar had these entries before their tags went out; exeradar was not
+  released that day, so its gate refused the next push to main instead — which is
+  the gate doing its job rather than a new defect.
+
 - **"Not valid" no longer means "we could not check".** `verify_signature()`
   returns a bitmask of thirteen flags and this package read it as `== OK`;
   everything else became `verified=False`, which `law_checker` turns into
