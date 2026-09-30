@@ -69,6 +69,8 @@ def result(
     ips=(),
     imports=(),
     error=None,
+    detail="detail",
+    verification=(),
 ) -> ExeResult:
     return ExeResult(
         path="C:/tmp/sample.exe",
@@ -84,7 +86,8 @@ def result(
             signer="CN=Example",
             chain=list(chain),
             timestamp=timestamp,
-            detail="detail",
+            detail=detail,
+            verification=tuple(verification),
         ),
     )
 
@@ -180,9 +183,57 @@ def test_an_unknown_signature_is_never_reported_as_unsigned():
     Off Windows the catalog cannot be consulted, so the absence of an embedded
     signature proves nothing — and a citation is an accusation.
     """
-    unknown = result(state=SignatureState.UNKNOWN, verified=None)
+    from exeradar.signature import NOT_VERIFIABLE_HERE
+
+    unknown = result(state=SignatureState.UNKNOWN, verified=None, detail=NOT_VERIFIABLE_HERE)
     assert findings_of(unknown, now=NOW) == {}
     assert any("not verifiable" in note for note in notes_of(unknown, now=NOW))
+
+
+def test_an_unknown_signature_says_which_of_its_reasons_applies():
+    """UNKNOWN has four causes and the note stated one of them regardless.
+
+    A truncated file, a PE that will not parse and a certificate table that
+    cannot be read all arrive here, and none of them are "the Windows catalog
+    cannot be consulted on this platform" — which is what a reader was told,
+    including on Windows, where the catalog had in fact been consulted.
+    """
+    truncated = result(
+        state=SignatureState.UNKNOWN,
+        verified=None,
+        detail="the certificate table starts at 100 and runs 4000 bytes, past the end of a 512-byte file",
+    )
+    notes = notes_of(truncated, now=NOW)
+
+    assert findings_of(truncated, now=NOW) == {}
+    assert any("past the end of a 512-byte file" in note for note in notes)
+    assert not any("on this platform" in note for note in notes)
+
+
+def test_a_check_that_did_not_conclude_is_a_note_and_not_a_finding():
+    """`verified is None` used to be indistinguishable from False.
+
+    An expired certificate, an algorithm LIEF does not implement, a signer
+    certificate the blob does not carry: all three came back as
+    "signature_invalid", severity high, cited against the CRA — for a file whose
+    bytes nobody had found fault with.
+    """
+    undetermined = result(verified=None, verification=("unsupported_algorithm",))
+    found = findings_of(undetermined, now=NOW)
+    notes = notes_of(undetermined, now=NOW)
+
+    assert "signature_invalid" not in found
+    assert any("did not conclude" in note and "unsupported_algorithm" in note for note in notes)
+    assert any("not a finding about the file" in note for note in notes)
+
+
+def test_an_invalid_signature_names_what_came_back():
+    """A verdict with nothing behind it is the thing this repository keeps
+    finding: the flags that produced it are in the evidence."""
+    found = findings_of(result(verified=False, verification=("bad_digest",)), now=NOW)
+
+    assert set(found) == {"signature_invalid"}
+    assert "bad_digest" in found["signature_invalid"][0]
 
 
 def test_an_embedded_signature_that_does_not_verify_is_a_finding():

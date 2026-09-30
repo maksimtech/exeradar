@@ -12,14 +12,63 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
-Nothing here changes the Python package, and `tests/test_version_contract.py`
-is right to refuse a version for it: no file under `exeradar/` has moved since
-v2026.40.1. What changed is the image and the pipeline. The image is
-republished by dispatching `docker.yml` with the current version, which is
-what closes the three vendored CVEs — a new tag would claim a package change
-that did not happen.
+The signature entries below *do* change the package, so the next release carries
+a version. The Docker entry further down does not and never did: that image is
+republished by dispatching `docker.yml` with the current version, and a tag for
+it would have claimed a package change that had not happened.
 
 ### Fixed
+
+- **"Not valid" no longer means "we could not check".** `verify_signature()`
+  returns a bitmask of thirteen flags and this package read it as `== OK`;
+  everything else became `verified=False`, which `law_checker` turns into
+  `signature_invalid` — "Embedded signature not valid", severity high, cited
+  against CRA Annex I Part I(2)(f) and art. 13(1), NIS2 art. 21(2)(d) and GDPR
+  art. 32(1). Five of the flags say nothing of the kind:
+
+  | flag | what it actually says |
+  |---|---|
+  | `UNSUPPORTED_ALGORITHM` | LIEF does not implement the algorithm |
+  | `CERT_NOT_FOUND` | the blob does not carry the signer's certificate, so there is nothing to compare against |
+  | `MISSING_PKCS9_MESSAGE_DIGEST` | the authenticated attributes are not laid out the way LIEF looks for. Older Authenticode blobs are not, and Windows accepts them |
+  | `CERT_EXPIRED`, `CERT_FUTURE` | the certificate's dates do not cover the moment of the check, which says nothing about the digest — and an expired certificate already has its own finding, with its own provisions |
+
+  `verified` is now three-valued and `None` means the check did not reach a
+  conclusion; the flags travel with it, so a report names the reason instead of
+  printing a verdict with nothing behind it. A file in that state produces a note
+  saying it is a limit of the check rather than a finding about the file, and
+  `exeradar verify` exits 2 — "could not be established" — where it used to exit
+  1, the code a script reads as "this signature is bad".
+
+- **A signature that is present and unreadable is no longer reported as absent.**
+  A certificate table that lies inside the file and cannot be parsed — a damaged
+  copy, a format LIEF declines, a deliberately malformed blob — fell through to
+  `UNSIGNED`: "no embedded signature and no catalog entry", about a file carrying
+  14 KB of one. On Windows the catalog was consulted first and also said no, which
+  made the wrong answer look corroborated. It is `UNKNOWN` now, with the size and
+  the offset of what is there.
+
+- **The notes no longer state a cause for `UNKNOWN` that may not be the one.**
+  Every unknown signature printed "the Windows catalog cannot be consulted on this
+  platform", including on Windows, where it had been consulted, and for a file
+  that simply would not parse. `UNKNOWN` has four causes and the note now carries
+  the one that applied.
+
+- **"Truncated" is no longer asserted as the cause.** A certificate table pointing
+  past the end of the file is a measurement; a cut-off download is an explanation,
+  and a malformed or forged header produces the same measurement. The detail gives
+  the numbers, offers the ordinary cause, and says which of the two it is has not
+  been established.
+
+- **The report claims no trust.** "signed and verified" and "valid" were doing the
+  work of "from a publisher this machine trusts", and no certificate store is
+  consulted anywhere in this tool: a self-signed certificate verified exactly as
+  well as a commercial one. What is measured is that the file still matches what
+  somebody signed, and that is what the sentence now says.
+
+  Twenty-three tests, including one that walks every flag LIEF exposes and fails
+  if a future version adds one nobody has classified — an unsorted flag would land
+  in "could not tell" and quietly stop being reported.
 
 - **The runtime image no longer carries the build tooling.** Docker Scout reported
   CVE-2025-47273, CVE-2026-57585 and GHSA-6v7p-g79w-8964 against

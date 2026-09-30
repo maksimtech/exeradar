@@ -194,10 +194,17 @@ def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, 
             signature.detail or "no embedded signature and no catalog entry"
         ]
     elif signature.state is SignatureState.EMBEDDED:
+        # `verified is False` and not `not signature.verified`: None means the
+        # check could not be completed — an algorithm LIEF does not implement, a
+        # certificate the blob does not carry, a validity window that does not
+        # cover today — and a finding of this severity, cited against the CRA,
+        # is not something to raise over the tool's own limits. It becomes a note
+        # instead, in notes_of below.
         if signature.verified is False:
             found["signature_invalid"] = [
-                "embedded signature present but not valid; declared signer: "
-                f"{signature.signer or 'none stated'}"
+                "embedded signature does not check out ("
+                f"{', '.join(signature.verification) or 'no reason reported'}"
+                f"); declared signer: {signature.signer or 'none stated'}"
             ]
         else:
             leaf = signature.chain[0] if signature.chain else None
@@ -256,8 +263,26 @@ def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
         return []
 
     notes = []
-    if result.signature.state is SignatureState.UNKNOWN:
-        notes.append(UNKNOWN_SIGNATURE_NOTE)
+    signature = result.signature
+    if signature.state is SignatureState.UNKNOWN:
+        # UNKNOWN has four causes now — a file LIEF cannot parse, one shorter
+        # than its own headers describe, a certificate table that could not be
+        # read, and a platform without the catalog — and this note stated the
+        # last of them whichever had happened. The detail says which.
+        from exeradar.signature import NOT_VERIFIABLE_HERE
+
+        if signature.detail and signature.detail != NOT_VERIFIABLE_HERE:
+            notes.append(f"signature not established: {signature.detail}; no provision is cited")
+        else:
+            notes.append(UNKNOWN_SIGNATURE_NOTE)
+    elif signature.state is SignatureState.EMBEDDED and signature.verified is None:
+        # The signature is there and the check did not reach a conclusion. Saying
+        # nothing would leave it looking like a clean verification.
+        notes.append(
+            "embedded signature present, and the check did not conclude ("
+            f"{', '.join(signature.verification) or 'no reason reported'}"
+            "): a limit of this check, not a finding about the file"
+        )
 
     found = findings_of(result, now=now)
     acts = {act for finding in found for act, _ in FINDING_ARTICLES[finding]}

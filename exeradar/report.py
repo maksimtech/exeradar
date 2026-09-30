@@ -271,9 +271,12 @@ def to_console_many(results: Sequence[ExeResult], console: Console | None = None
         if not r.error and r.signature.state.value in ("embedded", "catalog")
         and r.signature.verified
     )
+    # "signed and verified" read as "from a publisher this machine trusts", which
+    # is not what was measured: the file matches what was signed, by whoever
+    # signed it. No certificate store is consulted.
     flagged = sum(1 for r in results if r.findings)
     console.print(
-        f"\n{len(results)} files, {signed} signed and verified, {flagged} with findings"
+        f"\n{len(results)} files, {signed} matching their signature, {flagged} with findings"
     )
 
 
@@ -305,8 +308,26 @@ def signature_sentence(signature: Signature) -> str:
     state = signature.state.value
 
     if state == "embedded":
-        verdict = "valid" if signature.verified else "present but not valid"
-        return f"Embedded Authenticode signature, {verdict}."
+        # Three answers, not two. `not signature.verified` made "the check did
+        # not conclude" read as "present but not valid", which is an accusation
+        # where there was a limitation — and the limitation is usually ours: an
+        # algorithm LIEF does not implement, a certificate the blob does not
+        # carry, a validity window that does not cover today.
+        #
+        # "the file matches what was signed" and not "valid": no trust store is
+        # consulted anywhere in this tool, so a self-signed certificate gets the
+        # same sentence as a commercial one.
+        if signature.verified is True:
+            return "Embedded Authenticode signature; the file matches what was signed."
+        if signature.verified is False:
+            return (
+                "Embedded Authenticode signature, and the file does not match what was "
+                f"signed ({', '.join(signature.verification) or 'no reason reported'})."
+            )
+        return (
+            "Embedded Authenticode signature, not checked to a conclusion "
+            f"({', '.join(signature.verification) or 'no reason reported'})."
+        )
     if state == "catalog":
         return "Signed by catalog; the file carries no embedded signature."
     if state == "unsigned":

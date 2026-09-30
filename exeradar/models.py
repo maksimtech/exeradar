@@ -44,7 +44,19 @@ class Certificate:
 @dataclass
 class Signature:
     state: SignatureState = SignatureState.UNKNOWN
+    # True: the file matches what was signed and the blob is self-consistent.
+    # False: it does not — the digest, the signature or the structure is wrong.
+    # None: it could not be established, which is not the same as wrong. An
+    # algorithm LIEF does not implement, a signer certificate the blob does not
+    # carry and a certificate outside its validity window all land here.
+    #
+    # Note what True does not say: no operating system trust store is consulted,
+    # so a self-signed certificate verifies exactly as well as a commercial one.
     verified: bool | None = None
+    # LIEF's verification flags, lowercased — ("ok",), ("cert_expired",),
+    # ("bad_digest",). The reason behind `verified`, kept so that a report can
+    # name it instead of printing a verdict with nothing behind it.
+    verification: tuple[str, ...] = ()
     signer: str | None = None
     chain: list[Certificate] = field(default_factory=list)
     # From the RFC3161 token; None when there is no countersignature, which

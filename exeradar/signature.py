@@ -9,6 +9,16 @@ The distinction this module exists to keep is between C and "we could not
 look". Path B cannot run off Windows, so there the absence of an embedded
 signature is UNKNOWN. Reporting it as UNSIGNED would fire on most of System32,
 which is precisely where a reader would trust the tool least to be wrong.
+
+The same distinction applies to the verdict on a signature that *is* there, and
+that is newer than the three paths: `verified` is True, False or None, and None
+covers everything LIEF declined to check rather than found wrong. See
+`_verdict`.
+
+What none of this establishes is trust. No operating system certificate store is
+consulted, on any platform, so a self-signed certificate verifies exactly as
+well as one from a commercial authority. The question answered here is whether
+the file still matches what somebody signed, not whether anybody should have.
 """
 
 from __future__ import annotations
@@ -22,6 +32,11 @@ import lief
 from exeradar.models import Certificate, Signature, SignatureState
 
 _POWERSHELL_TIMEOUT = 60
+
+# UNKNOWN has more than one cause, and a reader is told which. This one is about
+# the platform and not about the file; law_checker matches on it to decide which
+# note to print, so it is a constant rather than a literal in two places.
+NOT_VERIFIABLE_HERE = "catalog signature: not verifiable on this platform"
 
 
 def catalog_available() -> bool:
@@ -75,11 +90,30 @@ def inspect(path: str | Path) -> Signature:
     if embedded is not None:
         return embedded
 
+    # A certificate table the parser could not turn into a signature is not the
+    # absence of a signature. Nothing above catches this: _unreadable only
+    # objects to a table that runs past the end of the file, so a blob that is
+    # entirely inside the file and still unreadable — a damaged copy, a format
+    # LIEF declines, a deliberately malformed one — fell through to UNSIGNED and
+    # was reported as "no embedded signature and no catalog entry".
+    declared = signed_regions(path)
+    if declared:
+        start, end = declared[0]
+        return Signature(
+            state=SignatureState.UNKNOWN,
+            verified=None,
+            detail=(
+                f"the file declares a certificate table of {end - start} bytes at offset "
+                f"{start}, and it could not be read as a signature: present, unreadable, "
+                "which is not the same as absent"
+            ),
+        )
+
     if not catalog_available():
         return Signature(
             state=SignatureState.UNKNOWN,
             verified=None,
-            detail="catalog signature: not verifiable on this platform",
+            detail=NOT_VERIFIABLE_HERE,
         )
 
     catalog = _catalog(path)
@@ -135,7 +169,9 @@ def _unreadable(path: Path) -> str | None:
             return (
                 "the certificate table starts at "
                 f"{directory.rva} and runs {directory.size} bytes, past the end of a "
-                f"{size}-byte file: truncated, so the signature cannot be read"
+                f"{size}-byte file, so the signature cannot be read. A cut-off "
+                "download is the ordinary cause and a malformed header looks the "
+                "same from here; which of the two it is has not been established"
             )
     return None
 
@@ -143,6 +179,89 @@ def _unreadable(path: Path) -> str | None:
 # ---------------------------------------------------------------------------
 # path A — embedded
 # ---------------------------------------------------------------------------
+
+
+# LIEF answers with a bitmask, and `!= OK` was read as "the signature is not
+# valid". Thirteen flags share that answer and they do not mean one thing.
+#
+# These say the file does not match what was signed, or that the structure is
+# broken. Nothing else can be concluded from them and nothing less: this is the
+# case where somebody changed the file after it was signed.
+_INVALID_FLAGS = (
+    "INVALID_SIGNER",
+    "INCONSISTENT_DIGEST_ALGORITHM",
+    "CORRUPTED_CONTENT_INFO",
+    "CORRUPTED_AUTH_DATA",
+    "BAD_DIGEST",
+    "BAD_SIGNATURE",
+    "NO_SIGNATURE",
+)
+
+# These say the check could not be completed. Reported as "not valid" they
+# accuse the publisher of the tool's own limits:
+#
+#   UNSUPPORTED_ALGORITHM         LIEF does not implement the digest or the key
+#   CERT_NOT_FOUND                the blob does not carry the signer's own
+#                                 certificate, so there is nothing to check
+#                                 against — normal for a file meant to be
+#                                 verified against a certificate store
+#   MISSING_PKCS9_MESSAGE_DIGEST  the authenticated attributes do not carry the
+#                                 PKCS#9 messageDigest LIEF looks for. Older
+#                                 Authenticode blobs are assembled differently,
+#                                 and Windows accepts them; what LIEF is saying
+#                                 is that it cannot do the comparison
+#   CERT_EXPIRED / CERT_FUTURE    the certificate's validity window does not
+#                                 cover the moment of the check. The digest is
+#                                 a separate question and this says nothing
+#                                 about it — and a countersignature usually
+#                                 answers it, which is why law_checker raises
+#                                 `certificate_expired` only without one
+_UNDETERMINED_FLAGS = (
+    "UNSUPPORTED_ALGORITHM",
+    "CERT_NOT_FOUND",
+    "MISSING_PKCS9_MESSAGE_DIGEST",
+    "CERT_EXPIRED",
+    "CERT_FUTURE",
+)
+
+
+def _flag_names(flags) -> tuple[str, ...]:
+    """The flags LIEF set, by name, lowest bit first.
+
+    OK is zero, so an empty mask is the good answer and has to be named rather
+    than left as an empty tuple that reads like "nothing was checked".
+    """
+    kinds = lief.PE.Signature.VERIFICATION_FLAGS
+    try:
+        mask = int(flags)
+    except (TypeError, ValueError):  # a LIEF that stops exposing the int
+        return (str(flags).rsplit(".", 1)[-1].lower(),)
+    if mask == 0:
+        return ("ok",)
+    names = []
+    for name in (*_INVALID_FLAGS, *_UNDETERMINED_FLAGS):
+        bit = int(getattr(kinds, name))
+        if bit and mask & bit:
+            names.append(name.lower())
+    if not names:                    # a flag this code has not heard of
+        names.append(f"unrecognised:{mask}")
+    return tuple(names)
+
+
+def _verdict(flags) -> tuple[bool | None, tuple[str, ...]]:
+    """What LIEF's answer is worth: valid, not valid, or not established.
+
+    The third is the one that was missing. `verify_signature() != OK` treated an
+    expired certificate and an algorithm LIEF cannot read as a file whose
+    signature does not check out — a `signature_invalid` finding, severity high,
+    cited against the CRA — when neither says anything about the bytes.
+    """
+    names = _flag_names(flags)
+    if names == ("ok",):
+        return True, names
+    if any(name in [f.lower() for f in _INVALID_FLAGS] for name in names):
+        return False, names
+    return None, names
 
 
 def _embedded(path: Path) -> Signature | None:
@@ -156,14 +275,20 @@ def _embedded(path: Path) -> Signature | None:
     signature = binary.signatures[0]
     chain = _chain(signature, _signer_serial(signature))
     stamp, stamper, problem = _timestamp(path)
+    verified, flags = _verdict(binary.verify_signature())
 
     detail = f"embedded {signature.digest_algorithm}".replace("ALGORITHMS.", "")
+    if verified is None:
+        detail = f"{detail}; not established: {', '.join(flags)}"
+    elif verified is False:
+        detail = f"{detail}; does not check out: {', '.join(flags)}"
     if problem:
         detail = f"{detail}; timestamp not read: {problem}"
 
     return Signature(
         state=SignatureState.EMBEDDED,
-        verified=binary.verify_signature() == lief.PE.Signature.VERIFICATION_FLAGS.OK,
+        verified=verified,
+        verification=flags,
         signer=chain[0].subject if chain else None,
         chain=chain,
         timestamp=stamp,

@@ -181,9 +181,13 @@ def verify(
     if found.timestamp:
         typer.echo(f"signed    {found.timestamp}")
 
+    # 0 the file matches what was signed, 1 it does not, 2 it could not be
+    # established. The third used to collapse into the second for an embedded
+    # signature whose check did not conclude: a script reading the exit code was
+    # told the signature was bad when the answer was that nobody knows.
     if state is SignatureState.CATALOG or (state is SignatureState.EMBEDDED and found.verified):
         raise typer.Exit(0)
-    if state is SignatureState.UNKNOWN:
+    if state is SignatureState.UNKNOWN or found.verified is None:
         raise typer.Exit(2)
     raise typer.Exit(1)
 
