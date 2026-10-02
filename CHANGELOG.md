@@ -15,6 +15,77 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Added
 
+- **Library versions, read out of the strings: a new `libraries.py` and a
+  `libraries` field on every report.** A statically linked zlib is invisible to
+  every dependency scanner that reads a manifest, because there is no manifest —
+  the code is inside the executable and the only place it says so is a string.
+  System32's `curl.exe` is the case in one line: it reports `curl 8.13.0` and
+  `zlib 1.3.1`, and nothing else in that file mentions zlib at all.
+
+  Four claims, and they are deliberately not the same claim:
+
+  | source | what it means |
+  |---|---|
+  | `banner` | the library states its own version and the code is here — `OpenSSL 3.5.8 25 Aug 2026`, `libcurl/8.22.0`, `expat_2.8.5` |
+  | `build path` | the source directory it was compiled in, left behind by an assert's `__FILE__` — `../openssl-3.5.8/crypto/asn1/a_int.c` |
+  | `assembly reference` | a version this file asks another file for at run time, not one it carries |
+  | `import` | used, and the version is in that DLL and not in this file — so the row names the DLL |
+
+  Every rule came out of running a loose version against a corpus of DLLs that are
+  each one known library — the Git for Windows ucrt64 tree plus
+  `C:\Windows\System32\curl.exe`, fifteen libraries, measured 2026-10-02 — so that
+  each answer could be checked against something true rather than against a
+  plausible shape.
+
+  **What it refuses matters more than what it finds.** Four of those fifteen carry
+  their version as a bare number with no name beside it: pcre2 as
+  `10.48 2026-08-31`, zstd as `1.5.7`, idn2 as `2.3.8`, and the committed
+  `python.exe` as `3.14.7`. None is reported. That shape is also an OID
+  (`1.2.840.113549.1.1.1`) and four bytes of debris (`8.9.:.`), both out of the
+  same corpus, and being right about pcre2 by accident is not worth being wrong
+  about those. Nor is a protocol version a library version: `http/1.1`,
+  `RTSP/1.0`, `TLS 1.2 (1.1, 1.0) ciphers to use` and `TLSv1.3` are fourteen of
+  the sixteen name-then-number strings in `curl.exe`, and libssh2's handshake
+  banner `SSH-2.0-libssh2_1.11.1` holds both numbers at once with only the second
+  belonging to the library.
+
+  Because silence is the common answer, `libraries.CAVEAT` is printed next to the
+  list whether or not there are rows: *a library missing from this list is not
+  absent*. An empty list is the answer most often misread.
+
+  Two decisions were wrong first and are recorded in the code as such. One row per
+  library hid the file that matters — Git's `curl.exe` states `curl 8.22.0` in its
+  own banner and imports `libcurl-4.dll`, which is where the code is and what
+  somebody patching curl would have to replace — so a library stated here *and*
+  imported now gets a row for each. And a comment claimed the banner's anchoring
+  was the rule doing the work; a mutation showed it changes no answer anywhere in
+  the corpus, so the comment now says what is true and the rule is kept for the
+  reason it actually has.
+
+  JSON keeps `"version": null` rather than dropping the key, which is the opposite
+  of what `tlp` does and deliberately: an absent `tlp` means nobody chose a label,
+  while a null version means the file was asked and did not say.
+
+  The scanner now extracts the strings once and gives both passes the same list —
+  the library pass needs the raw runs, since a release directory is a path and
+  `OpenSSL 3.5.8 25 Aug 2026` is in none of the four buckets. A second call would
+  have read a 25 MB DLL twice, which `test_the_file_is_read_for_strings_exactly_once`
+  now prevents.
+
+  54 tests, of which eight run against the corpus itself. `ARCHITECTURE.md` gains
+  section 8 for the module, and its layout list is brought back in line — four
+  modules added in earlier commits were missing from it and one that does not exist
+  was in it.
+
+### Changed
+
+- **`README.md`'s `analyze` transcript is regenerated from the tool.** It was a
+  claim about what gets printed, and three things had drifted out of it: the
+  overlay line, the signature sentence — which stopped saying "valid" when it
+  stopped being able to mean it — and now the Libraries block. `python.exe` turns
+  out to be the best example of the new refusal, so the three things in that output
+  that are the tool declining to overclaim are now four.
+
 - **A report can carry its own distribution terms: `--tlp` on `analyze` and
   `batch`.** This is the case FIRST's Traffic Light Protocol exists for — a finding
   sent to a vendor's PSIRT before it is public, where whether the recipient may

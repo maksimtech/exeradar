@@ -80,6 +80,25 @@ class Import:
     functions: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class Library:
+    """A library the file names, and what naming it consisted of.
+
+    Frozen, unlike the rest of this module: `libraries` deduplicates by putting
+    these in a dict, and 611 copies of one OpenSSL build path have to collapse to
+    one row.
+
+    `version` is None when the file uses a library without saying which version —
+    an import, where the version is in the other file. That is a different answer
+    from the library being absent, and `source` is what tells them apart.
+    """
+
+    name: str
+    version: str | None
+    source: str        # see exeradar.libraries: banner, build path, assembly, import
+    evidence: str      # the string that said it, or the DLL that was imported
+
+
 @dataclass
 class Strings:
     urls: list[str] = field(default_factory=list)
@@ -112,6 +131,11 @@ class ExeResult:
     sections: list[Section] = field(default_factory=list)
     imports: list[Import] = field(default_factory=list)
     strings: Strings = field(default_factory=Strings)
+    # Drawn from the strings and the imports together, because the two answer
+    # different halves of the question: a string can say which version is in here,
+    # and an import can only say which file to ask next. An empty list is not
+    # "no libraries" — see exeradar.libraries.CAVEAT, which the reports carry.
+    libraries: list[Library] = field(default_factory=list)
     signature: Signature = field(default_factory=Signature)
     findings: list[Finding] = field(default_factory=list)
     # Bytes past the last section, which the strings pass did not read. Kept on

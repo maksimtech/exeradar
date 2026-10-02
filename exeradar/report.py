@@ -20,6 +20,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+from exeradar import libraries
 from exeradar.formats import pe
 from exeradar.models import ExeResult, Signature
 from exeradar.tlp import Label, banner
@@ -159,6 +160,13 @@ def to_markdown(result: ExeResult, tlp_label: Label | None = None) -> str:
         lines.append(f"- …and {len(result.imports) - _IMPORTS_SHOWN} more")
     lines.append("")
 
+    lines += ["## Libraries", "", f"_{libraries.CAVEAT}_", ""]
+    if result.libraries:
+        lines += [f"- {libraries.sentence(library)}" for library in result.libraries]
+    else:
+        lines.append("None stated.")
+    lines.append("")
+
     lines += ["## Strings", ""]
     buckets = (("URLs", result.strings.urls), ("IPs", result.strings.ips),
                ("Hosts", result.strings.hosts), ("Paths", result.strings.paths))
@@ -232,6 +240,14 @@ def to_console(result: ExeResult, console: Console | None = None) -> None:
         console.print(f"  {imported.dll:<34} {len(imported.functions):>4}{suffix}")
     if len(result.imports) > _IMPORTS_SHOWN:
         console.print(f"  [dim]…and {len(result.imports) - _IMPORTS_SHOWN} more[/dim]")
+    console.print()
+
+    console.print(f"[bold]Libraries[/bold] {len(result.libraries) or 'none stated'}")
+    for library in result.libraries:
+        console.print(f"  {libraries.sentence(library)}")
+    # Printed whether or not there are rows: an empty list is the case most often
+    # misread, and a short list is misread the same way.
+    console.print(f"  [dim]{libraries.CAVEAT}[/dim]")
     console.print()
 
     found = result.strings

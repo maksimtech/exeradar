@@ -25,12 +25,15 @@ exeradar/
     macho.py           v2
   signature.py         the three paths of section 3
   strings.py           extraction, then classification into URL / IP / host
+  tlds.py              the delegated suffixes strings.py checks a host against
+  libraries.py         component versions out of those strings, section 8
   models.py            the result dataclasses
   report.py            console, JSON, Markdown
+  tlp.py               FIRST TLP 2.0 labels on a report that leaves the machine
+  first_teams.py       FIRST's member directory: which PSIRT answers for a vendor
   law_checker.py       findings -> legal citations
   law_cache.py         from the family, unchanged
   law_fetcher.py       from the family, plus annexes and the Cellar source
-  utils.py
 tests/
   fixtures/            sample binaries, legal HTML
   docker/smoke.py
@@ -277,6 +280,7 @@ pasting into a ticket.
 | PE header | `formats/pe.py` | machine, subsystem, sections, entropy |
 | Import table | `formats/pe.py` | plus DLL categorisation, which is the value added |
 | Readable strings | `strings.py` | ASCII and UTF-16LE, then classification |
+| Library versions | `libraries.py` | from those strings and the imports — section 8 |
 | Certificates | `signature.py` | chain, issuer, subject, validity |
 | Signature verification | `signature.py` | the three paths of section 3 |
 | SHA-256 | `scanner.py` | of the file as given |
@@ -304,9 +308,59 @@ Only findings reach `law_checker`.
 
 ---
 
-## 8. Later, not now
+## 8. `libraries.py` — three claims, and the silence
 
-- NVD lookup for known vulnerabilities in identified components.
+A version read out of a binary is worth having for one reason: it is what a CVE
+matches against. A statically linked zlib is invisible to every dependency
+scanner that reads a manifest, because there is no manifest — the code is in the
+executable, and the only place it says so is a string.
+
+Which is also why a wrong row is expensive. `http 1.1` printed beside
+`openssl 3.5.8` costs the second one its credibility, and a section nobody reads
+past measures nothing. So the rules refuse more than they accept, and each
+refusal came out of running a loose version against a corpus of DLLs that are
+each one known library: the Git for Windows ucrt64 tree plus
+`C:\Windows\System32\curl.exe`, fifteen libraries, measured 2026-10-02.
+
+Three claims, and they are deliberately not the same claim:
+
+| source | meaning | example |
+| --- | --- | --- |
+| `banner` | the library states its own version, and the code is here | `OpenSSL 3.5.8 25 Aug 2026` |
+| `build path` | the source directory it was compiled in, left by an assert's `__FILE__` | `../openssl-3.5.8/crypto/asn1/a_int.c` |
+| `assembly reference` | a version this file asks another file for at run time | `Katana, Version=1.1.8.0, Culture=neutral` |
+| `import` | used, and the version is in that DLL rather than in this file | `libcrypto-3-x64.dll` |
+
+The fourth answer is silence, and it is common. Four of the fifteen libraries in
+the corpus carry their version as a bare number with no name beside it — pcre2 as
+`10.48 2026-08-31`, zstd as `1.5.7`, idn2 as `2.3.8`, the committed `python.exe`
+as `3.14.7`. None is reported. A number nothing attributes has the same shape as
+an OID (`1.2.840.113549.1.1.1`) and as four bytes of debris (`8.9.:.`), both of
+which also came out of that corpus, and being right about pcre2 by accident is
+not worth being wrong about those.
+
+That is what `libraries.CAVEAT` says, and why both renderers print it whether or
+not there are rows: an empty list is the answer most often misread. A library
+missing from it is not a library the file does not use.
+
+Two decisions worth recording, because the first version of each was wrong:
+
+**A library both stated here and imported gets a row for each.** One row per
+library hid the file that matters — Git's `curl.exe` states `curl 8.22.0` in its
+own banner and imports `libcurl-4.dll`, which is where the code is and what
+somebody patching curl would replace.
+
+**A banner must be the start of the string.** Searching instead changes no answer
+anywhere in the corpus, which was checked rather than assumed; the rule is kept
+because stating a version and discussing one are not recoverable from each other
+once both are a row.
+
+---
+
+## 9. Later, not now
+
+- NVD lookup for known vulnerabilities in identified components — section 8
+  identifies them; nothing here looks them up yet.
 - Domain allowlist and blocklist comparison for extracted hosts.
 - SBOM integration.
 - ELF and Mach-O, through `formats/`.

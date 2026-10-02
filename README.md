@@ -57,9 +57,10 @@ $ exeradar analyze python.exe
 python.exe
   PE AMD64, 106,208 bytes, built 2026-08-05 10:58:33 UTC
   sha256 4942b86a6597e5aee0128daa00050ed79bc21f6e709a78eb19cbfeb0c2f39ac9
+  overlay 14,048 bytes past the last section, not read for strings
 
 Signature embedded
-  Embedded Authenticode signature, valid.
+  Embedded Authenticode signature; the file matches what was signed.
   signer     C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
   signed     2026-08-05 11:45:32 UTC
 
@@ -73,25 +74,39 @@ Imports 8 libraries, 44 functions — no category claimed
   api-ms-win-crt-locale-l1-1-0.dll      1
   api-ms-win-crt-heap-l1-1-0.dll        1
 
+Libraries none stated
+  A version here is one the file states about itself. A library missing from this list is not absent: a dynamically linked one 
+leaves an import, not a string, and some state no version at all.
+
 Strings 1 urls, 0 ips, 0 hosts, 1 paths
   url   http://schemas.microsoft.com/SMI/2016/WindowsSettings
   path  D:\a\1\b\bin\amd64\python.pdb
 
- section  virtual  raw     entropy
- .text    3,628    4,096   6.00
- .rdata   3,942    4,096   4.27
- .data    1,664    512     0.53
- .pdata   348      512     3.77
- .rsrc    80,928   81,408  6.17
- .reloc   48       512     3.90
+ section  virtual  raw     entropy 
+ .text    3,628    4,096   6.00    
+ .rdata   3,942    4,096   4.27    
+ .data    1,664    512     0.53    
+ .pdata   348      512     3.77    
+ .rsrc    80,928   81,408  6.17    
+ .reloc   48       512     3.90    
 ```
 
-Three things in that output are the tool refusing to overclaim.
+Four things in that output are the tool refusing to overclaim.
 
 **"no category claimed"** — `KERNEL32.dll` imports 15 functions and the
 categoriser says nothing about them, because a library that every binary loads
 tells you nothing about what this one does. Categories are decided from the
 imported functions, not from the library name.
+
+**"Libraries none stated"** — and this binary does carry a version. `3.14.7` is
+in there as a bare string with nothing beside it to say what it belongs to, so it
+is not reported. The same shape is also what an OID and a few bytes of debris look
+like, and a number attributed to whichever library the filename suggests is a
+guess with a citation attached. Four of the fifteen libraries measured while this
+was written say their version that way; none of them is claimed. What is claimed
+is what a file states about itself — `OpenSSL 3.5.8 25 Aug 2026`, `libcurl/8.22.0`,
+`inflate 1.3.1 Copyright …` — plus, for a library it only imports, the name of the
+DLL whose version to go and read.
 
 **One URL, not eleven** — the certificate table is excluded from string
 extraction. Everything in there belongs to whoever signed the file: on this
