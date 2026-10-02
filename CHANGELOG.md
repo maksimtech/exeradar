@@ -262,6 +262,19 @@ it would have claimed a package change that had not happened.
 
 ### Fixed
 
+- **The image Snyk scans has a fixed tag, so code scanning keeps one
+  configuration for it.** It was built as `snyk-scan:${GITHUB_SHA}`, and Snyk
+  Container writes its own automation id into the SARIF from the image reference it
+  scanned — overriding the `category:` given to `upload-sarif`. So every commit
+  minted a new code-scanning configuration that nothing could ever find again, and a
+  pull request was told *"configurations present on refs/heads/main were not
+  found"* and could no longer be shown which alerts it had introduced.
+
+  Measured on 2026-10-02 in apkradar, which had reached **32** of them and whose
+  pull request #16 could not be diffed. This repository shows one, because its image
+  does not carry the extra target Snyk names the image in. The tag is the same in
+  all five, so the fix is too: the defect is there whether or not it has surfaced.
+
 - **Two advisories of 2026-09-30 are recorded.** `CVE-2026-84782` (OpenSSL, DTLS
   retransmission, already fixed in Debian at 3.5.7-1~deb13u3 and waiting only on a
   rebuild) and `SNYK-DEBIAN13-GCC14-20335537` / CVE-2026-102010 (open in trixie
