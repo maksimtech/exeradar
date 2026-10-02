@@ -192,5 +192,82 @@ def verify(
     raise typer.Exit(1)
 
 
+@app.command()
+def psirt(
+    organisation: str = typer.Argument(..., help='Organisation name, e.g. "HP Inc."'),
+    key: bool = typer.Option(
+        False, "--key", help="Print only the PGP public key block, for piping into gpg --import."
+    ),
+) -> None:
+    """Who answers for a vulnerability, from FIRST's member directory.
+
+    Made to be used from a script, so the exit code carries the answer:
+
+        0  one team, matched exactly on its name
+        1  FIRST lists no member team by that name
+        2  it could not be settled — the directory was unreachable, or nothing
+           it returned matches the name exactly
+
+    The third is the one that earns its keep. "Hewlett Packard" returns Hewlett
+    Packard Enterprise, split off in 2015, and not HP Inc., whose name is on a
+    250 G6; printing what came back would hand a script the address of the wrong
+    company for an embargoed finding. Whatever the directory returned is printed
+    and nothing is chosen — one inexact candidate is no more an answer than two.
+
+    1 and 2 are not the same answer either: FIRST is a membership body and does
+    not list every PSIRT, so "no member team" is a fact about the directory and
+    sends a reader to the vendor's security.txt, while 2 says nobody got an
+    answer at all.
+    """
+    from exeradar import first_teams
+
+    try:
+        resolution = first_teams.resolve(organisation)
+    except Exception as error:  # noqa: BLE001 - reported, never a traceback
+        typer.secho(f"could not ask FIRST: {error}", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(2) from error
+
+    team = resolution.team
+    if team is None:
+        typer.secho(resolution.reason, fg=typer.colors.YELLOW, err=True)
+        for candidate in resolution.candidates:
+            typer.echo(f"  {candidate.host or candidate.name}  {candidate.email}")
+        # Candidates mean the question has more than one answer; none means the
+        # directory answered that it has no such member.
+        raise typer.Exit(2 if resolution.candidates else 1)
+
+    if key:
+        # Nothing else on stdout: this is meant to be piped into gpg --import.
+        if not team.pgp_key:
+            typer.secho(
+                f"{team.host or team.name} has no PGP key in the directory; "
+                f"fingerprint on record: {team.pgp_fingerprint or 'none'}",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo(team.pgp_key)
+        raise typer.Exit(0)
+
+    typer.secho(team.full_name, bold=True)
+    typer.echo(f"  organisation  {team.host}")
+    typer.echo(f"  membership    {team.membership}" + (f", since {team.member_since}" if team.member_since else ""))
+    typer.echo(f"  country       {team.country}")
+    typer.echo(f"  report to     {team.email}")
+    if team.website:
+        typer.echo(f"  policy        {team.website}")
+    if team.pgp_fingerprint:
+        typer.echo(f"  pgp           {team.pgp_fingerprint}" + (f"  ({team.pgp_id})" if team.pgp_id else ""))
+        typer.echo("                --key prints the block, for gpg --import")
+    else:
+        typer.echo("  pgp           none in the directory")
+    if team.last_modified:
+        # An entry from 2019 is still the authoritative one; its age is not a
+        # reason to doubt it, and is a reason to read it as a record rather than
+        # as something checked this morning.
+        typer.echo(f"  entry dated   {team.last_modified}")
+    raise typer.Exit(0)
+
+
 if __name__ == "__main__":
     app()

@@ -57,7 +57,23 @@ it would have claimed a package change that had not happened.
   cannot notice a renamed field, and `pgp-fingerprint` disappearing would leave
   every other test green while the letters went out without a key.
 
-  No caller yet: this is the source, not the letter.
+  **`exeradar psirt <organisation>`** is the caller. Like `verify` it is meant to
+  be used from a script, so the exit code carries the answer: **0** one team
+  matched exactly, **1** FIRST lists no member team by that name, **2** the
+  directory was unreachable or nothing it returned matches exactly. 1 and 2 are
+  different answers — the first sends a reader to the vendor's security.txt, the
+  second says nobody got an answer — and 2 also covers the case this command
+  exists for, where printing what came back would hand a script the wrong
+  company's address.
+
+  `--key` prints the public key block and nothing else, for
+  `exeradar psirt "HP Inc." --key | gpg --import`. With a fingerprint on record
+  and no key block it exits 1 and prints the fingerprint, so the key can be
+  fetched elsewhere and checked against it.
+
+  Ten more tests. Two of them passed before the command existed — Typer exits 2
+  on an unknown command, so an exit code alone proves nothing — and were tightened
+  until they could only pass against the real thing.
 
 ### Fixed
 
