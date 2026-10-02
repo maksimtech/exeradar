@@ -22,6 +22,7 @@ from rich.table import Table
 
 from exeradar.formats import pe
 from exeradar.models import ExeResult, Signature
+from exeradar.tlp import Label, banner
 
 _EXTENSIONS = {
     ".json": "json",
@@ -67,19 +68,45 @@ def _as_data(result: ExeResult) -> dict:
     return data
 
 
-def to_json(result: ExeResult) -> str:
-    return json.dumps(_as_data(result), indent=2, ensure_ascii=False, sort_keys=False)
+def _marked(data: dict, label: Label | None) -> dict:
+    """The record with its distribution label, or exactly the record.
+
+    A field and not a banner: JSON is read by a tool, and a marking inside a
+    string would have to be parsed back out — a consumer that cannot see it cannot
+    respect it. Absent rather than null when nothing was asked for, because
+    `"tlp": null` and `"tlp": "TLP:CLEAR"` both say something, and nobody said it.
+    """
+    if label is None:
+        return data
+    return {"tlp": label.value, **data}
 
 
-def to_json_many(results: Iterable[ExeResult]) -> str:
-    """One array, same objects. A consumer parses one shape, not two."""
-    return json.dumps([_as_data(r) for r in results], indent=2,
+def to_json(result: ExeResult, tlp_label: Label | None = None) -> str:
+    return json.dumps(_marked(_as_data(result), tlp_label), indent=2,
                       ensure_ascii=False, sort_keys=False)
 
 
-def to_markdown(result: ExeResult) -> str:
+def to_json_many(results: Iterable[ExeResult], tlp_label: Label | None = None) -> str:
+    """One array, same objects. A consumer parses one shape, not two.
+
+    The label goes on every object rather than on a wrapper: a batch report is one
+    document, and a consumer reading a single row out of the array must still see
+    the terms it came under.
+    """
+    return json.dumps([_marked(_as_data(r), tlp_label) for r in results], indent=2,
+                      ensure_ascii=False, sort_keys=False)
+
+
+def _markdown_banner(label: Label | None) -> list[str]:
+    """The distribution block, above the heading, where a reader meets it."""
+    if label is None:
+        return []
+    return [f"> {line}" for line in banner(label).splitlines()] + [""]
+
+
+def to_markdown(result: ExeResult, tlp_label: Label | None = None) -> str:
     name = Path(result.path).name
-    lines = [f"# {name}", ""]
+    lines = [*_markdown_banner(tlp_label), f"# {name}", ""]
 
     if result.error:
         lines += [f"**Could not analyse:** {result.error}", "", f"- SHA-256: `{result.sha256 or 'unknown'}`", ""]
@@ -232,8 +259,17 @@ def to_console(result: ExeResult, console: Console | None = None) -> None:
         console.print(table)
 
 
-def to_markdown_many(results: Iterable[ExeResult]) -> str:
-    return "\n".join(to_markdown(result) for result in results)
+def to_markdown_many(results: Iterable[ExeResult],
+                     tlp_label: Label | None = None) -> str:
+    """One document, so the marking appears once at the top of it.
+
+    Not once per file: a batch report is a single thing a person reads and
+    forwards, and repeating the block between every heading would train the eye to
+    skip it. The JSON form is the opposite — a consumer can read one object out of
+    the array, so there the label is on each.
+    """
+    body = "\n".join(to_markdown(result) for result in results)
+    return "\n".join([*_markdown_banner(tlp_label), body])
 
 
 def to_console_many(results: Sequence[ExeResult], console: Console | None = None) -> None:
@@ -280,18 +316,21 @@ def to_console_many(results: Sequence[ExeResult], console: Console | None = None
     )
 
 
-def write(result: ExeResult, path: str | Path) -> str:
+def write(result: ExeResult, path: str | Path, tlp_label: Label | None = None) -> str:
     """Render to the file the name asks for. Returns the format used."""
     chosen = format_for(path)
-    text = to_json(result) if chosen == "json" else to_markdown(result)
+    text = (to_json(result, tlp_label) if chosen == "json"
+            else to_markdown(result, tlp_label))
     Path(path).write_text(text + "\n", encoding="utf-8")
     return chosen
 
 
-def write_many(results: Sequence[ExeResult], path: str | Path) -> str:
+def write_many(results: Sequence[ExeResult], path: str | Path,
+               tlp_label: Label | None = None) -> str:
     """Render a whole run to the file the name asks for. Returns the format."""
     chosen = format_for(path)
-    text = to_json_many(results) if chosen == "json" else to_markdown_many(results)
+    text = (to_json_many(results, tlp_label) if chosen == "json"
+            else to_markdown_many(results, tlp_label))
     Path(path).write_text(text + "\n", encoding="utf-8")
     return chosen
 

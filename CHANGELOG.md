@@ -15,6 +15,49 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Added
 
+- **A report can carry its own distribution terms: `--tlp` on `analyze` and
+  `batch`.** This is the case FIRST's Traffic Light Protocol exists for — a finding
+  sent to a vendor's PSIRT before it is public, where whether the recipient may
+  forward it is the whole question. exeradar is the Radar whose reports go to a
+  PSIRT, and since `exeradar psirt` now finds the address and the key, the document
+  needed a way to say its own terms.
+
+  Where the label goes differs by format, and that is the one new decision here:
+
+  | format | where | why |
+  |---|---|---|
+  | Markdown | a quoted block above the heading | it is read by a person, and that is where they meet it |
+  | JSON | a `tlp` field, first | it is read by a tool; a banner in a string would have to be parsed back out, and a consumer that cannot see a marking cannot respect it |
+
+  A batch report is marked **once** in Markdown — one document, and repeating the
+  block between headings teaches the eye to skip it — and on **every object** in
+  JSON, because a consumer can read a single row out of the array and must still see
+  the terms it came under. `test_both_formats_carry_the_same_label` holds the two
+  forms to the same answer for all five labels.
+
+  Written for real while this was added:
+
+  ```
+  > Distribution: TLP:AMBER+STRICT (TLP 2.0 — https://www.first.org/tlp/)
+  > May be shared with members of the recipient's organisation only, and no further.
+
+  # python.exe
+  ```
+
+  An unmarked report stays unmarked: no block, and **no `tlp` key at all** — not
+  `null`, and not `TLP:CLEAR`. Silence from whoever ran the scan is not permission
+  to redistribute. A label the standard does not define stops the command before
+  the file is opened, and `TLP:WHITE` is refused by name with its replacement:
+  *TLP:WHITE belongs to TLP 1.0 and was renamed in TLP 2.0: use TLP:CLEAR instead*.
+
+  The console output is deliberately not marked. A terminal is not a document that
+  travels, and a label printed where it cannot be respected teaches a reader to
+  ignore it where it can.
+
+  `exeradar/tlp.py` arrives by copy from apkradar, the way `law_fetcher` and
+  `first_teams` do, with its own thirty-four tests; seventeen more cover the report
+  and the commands.
+
 - **The gate reads FIRST's forecast on the CVEs it already holds.** EPSS is indexed
   by CVE, and `SECURITY-EXCEPTIONS.toml` is the one surface in this repository that
   holds CVE ids: Docker Scout names its alerts by CVE, so every accepted finding

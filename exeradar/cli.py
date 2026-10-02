@@ -73,10 +73,26 @@ def analyze(
     path: str = typer.Argument(..., help="Executable to analyse"),
     output: str = typer.Option(None, "--output", "-o",
                                help="Write the report to a file; the extension picks the format"),
+    tlp: str = typer.Option(
+        None, "--tlp",
+        help="Mark the written report with a FIRST TLP 2.0 label: clear, green, "
+             "amber, amber+strict, red. Omitted, the report is unmarked.",
+    ),
 ) -> None:
     """Analyse one executable."""
     from exeradar import report
+
+    # Before the file is opened: a label the standard does not define is
+    # answerable on its own, and reading a binary first would mean failing after
+    # the work over a typo. The same reason `--output` is validated up here.
+    from exeradar import tlp as tlp_mod
     from exeradar.scanner import scan
+
+    try:
+        label = tlp_mod.parse_optional(tlp)
+    except tlp_mod.TlpError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
 
     # Checked before the scan: refusing a filename after a minute of work
     # would be a poor trade, and the extension is knowable up front.
@@ -90,7 +106,7 @@ def analyze(
     result = scan(path)
 
     if output and not result.error:
-        chosen = report.write(result, output)
+        chosen = report.write(result, output, tlp_label=label)
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
     else:
         report.to_console(result)
@@ -104,12 +120,28 @@ def batch(
     directory: str = typer.Argument(..., help="Directory to walk"),
     output: str = typer.Option(None, "--output", "-o",
                                help="Write one report for the run; the extension picks the format"),
+    tlp: str = typer.Option(
+        None, "--tlp",
+        help="Mark the written report with a FIRST TLP 2.0 label: clear, green, "
+             "amber, amber+strict, red. Omitted, the report is unmarked.",
+    ),
 ) -> None:
     """Analyse every PE in a directory, recursively."""
     from pathlib import Path
 
     from exeradar import report
+
+    # Before the file is opened: a label the standard does not define is
+    # answerable on its own, and reading a binary first would mean failing after
+    # the work over a typo. The same reason `--output` is validated up here.
+    from exeradar import tlp as tlp_mod
     from exeradar.scanner import format_of, scan
+
+    try:
+        label = tlp_mod.parse_optional(tlp)
+    except tlp_mod.TlpError as error:
+        typer.secho(str(error), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from None
 
     root = Path(directory)
     if not root.is_dir():
@@ -133,7 +165,7 @@ def batch(
     report.to_console_many(results)
 
     if output and results:
-        chosen = report.write_many(results, output)
+        chosen = report.write_many(results, output, tlp_label=label)
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
 
 
