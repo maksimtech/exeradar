@@ -17,6 +17,48 @@ a version. The Docker entry further down does not and never did: that image is
 republished by dispatching `docker.yml` with the current version, and a tag for
 it would have claimed a package change that had not happened.
 
+### Added
+
+- **FIRST's member directory, as a source.** CVE names a flaw and NVD scores it;
+  FIRST is the body that says who answers for it. `exeradar/first_teams.py` reads
+  `api.first.org/data/v1/teams` — public, no credentials, `"access": "public"` in
+  every response — and returns each team with its verified address and the PGP key
+  to encrypt to. Until now that lookup happened by hand, in a browser, once per
+  disclosure.
+
+  Two rules shape it, and neither is about HTTP.
+
+  **It never chooses between two organisations.** A search for "hewlett" returns
+  Hewlett Packard Enterprise — split off in 2015 — *before* HP Inc., whose name is
+  on a 250 G6. Both are full members, with different addresses and different keys:
+
+  | | | |
+  |---|---|---|
+  | HP Inc. PSRT | `hp-security-alert@hp.com` | `0xF46ECE7D08F8DDD9` |
+  | HPE PSRT | `security-alert@hpe.com` | a different key |
+
+  Taking the first row would send an embargoed finding to the wrong company, so
+  `search` returns every candidate and `resolve` answers only on an exact name,
+  handing the candidates back otherwise. Measured by mutation: a resolver that
+  takes `candidates[0]` fails two of the tests.
+
+  **An empty answer is never an answer about the vendor.** FIRST lists its members;
+  most PSIRTs are not in it. "No member team" comes back as a reason that says so
+  and points at security.txt instead; a timeout raises. The same split
+  `collectors/` keeps between "nothing found" and "could not ask".
+
+  A fingerprint is normalised to forty uppercase hex characters or dropped — the
+  directory prints some of them in spaced groups, and a malformed fingerprint
+  offered as one is worse than none, because it is what a key gets checked
+  against. A row with no address is dropped: it answers nothing.
+
+  Eighteen tests. Seventeen run on trimmed copies of the live payloads; the
+  eighteenth asks the real directory, and only when `EXERADAR_LIVE=1` — a copy
+  cannot notice a renamed field, and `pgp-fingerprint` disappearing would leave
+  every other test green while the letters went out without a key.
+
+  No caller yet: this is the source, not the letter.
+
 ### Fixed
 
 - **Two advisories of 2026-09-30 are recorded.** `CVE-2026-84782` (OpenSSL, DTLS
