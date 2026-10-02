@@ -16,52 +16,17 @@
 # Written on 2026-09-29 against the nine blocking alerts GitHub then held for this
 # repository.
 #
-# Three of them are fixed and still listed, which is worth understanding before
-# reading them as accepted risk. CVE-2025-47273, CVE-2026-57585 and
-# GHSA-6v7p-g79w-8964 were reported against `pip/_vendor/bom.cdx.json` — copies
-# vendored inside the build tooling, which a pin cannot reach. The Dockerfile now
-# removes pip, setuptools and wheel after the install, the fix patchradar proved
-# on 2026-09-29. But docker-scout.yml scans `maksimtech/exeradar:latest` from
-# Docker Hub, not the image built in CI, so these three close when the next image
-# is published and not when the Dockerfile changed. Their dates are short for
-# exactly that reason: if they are still here afterwards, either the publish did
-# not happen or the fix did not work, and both are worth a build failing over.
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Copies vendored inside pip and setuptools in the *published* image. Fixed in
-# the Dockerfile on 2026-09-29 by removing the build tooling from the runtime
-# image; a pin could not reach them, because the vulnerable copies live under
-# `pip/_vendor/` and an explicit install adds a second, patched copy beside them.
-# These three close when the next image is published and not before.
+# Pruned on 2026-10-02. Four entries that had been written as "closes when the
+# next image is published" did close: CVE-2025-47273, CVE-2026-57585 and
+# GHSA-6v7p-g79w-8964 were copies vendored under `pip/_vendor/`, which the
+# Dockerfile now removes with the rest of the build tooling, and CVE-2026-84782
+# was openssl, which Debian fixed in 3.5.7-1~deb13u3 and `apt-get upgrade` picked
+# up at the rebuild. GitHub closed all four at 2026-09-30T19:26:53Z — one
+# timestamp, the republish — and Docker Scout has run six times since without
+# mentioning any of them. They are out, and their return would mean the fix
+# regressed, which is worth a build failing over.
 #
-# That the fix works is no longer an expectation. In docker-build-check.yml run
-# 36587553929, on 2026-09-29, tests/docker/inspect.sh reported pip, setuptools and
-# wheel all absent from the image built out of this repository, found no
-# `pip/_vendor/bom.cdx.json` left anywhere in it, and counted 87 packages — with
-# the smoke test and the CLI still passing, which is the part a removal like this
-# could have broken.
-# ─────────────────────────────────────────────────────────────────────────────
-
-[[exception]]
-id = "CVE-2025-47273"
-source = "Docker Scout"
-where = "setuptools, vendored in the published image (pip/_vendor/bom.cdx.json)"
-why = "Fixed in the Dockerfile on 2026-09-29; closes when the next image is published."
-review_by = "2026-10-31"
-
-[[exception]]
-id = "CVE-2026-57585"
-source = "Docker Scout"
-where = "msgpack, vendored in pip inside the published image"
-why = "Fixed in the Dockerfile on 2026-09-29; closes when the next image is published."
-review_by = "2026-10-31"
-
-[[exception]]
-id = "GHSA-6v7p-g79w-8964"
-source = "Docker Scout"
-where = "msgpack, vendored in pip inside the published image"
-why = "The same msgpack copy as CVE-2026-57585, reported under its GHSA id."
-review_by = "2026-10-31"
+# CVE-2026-82560 is the counter-case and stays, which is in its own entry below.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Debian 13 (trixie) packages of the base image. `apt-get upgrade` runs at build
@@ -121,6 +86,18 @@ of their own. The full `perl` is not here, so there is nothing to remove.
 
 So the finding is ours to record and not ours to close. The date is for re-reading \
 whether Debian has published a fix, not for trying the removal again.
+
+And since 2026-09-29T15:08:22Z Docker Scout has stopped reporting it, which is why \
+the gate lists this entry as settled. It is kept anyway, and the distinction is the \
+point: the four entries pruned on 2026-10-02 went quiet because the thing they \
+described left the image. This one went quiet on its own. \
+`patchradar debian CVE-2026-82560` on 2026-10-02 still reports perl no-dsa in \
+trixie at 5.40.1-6+deb13u1, no fix in any suite, Debian bug 1148455 — so perl-base \
+is still installed and still unfixed, and only the reporting changed. Scout has \
+already changed its mind about this exact id once, which \
+`.github/workflows/security-posture.yml` records as the reason the gate reads \
+closed alerts at all. Deleting a flaw that is demonstrably present because a \
+scanner fell silent is the one direction this file must not drift in.
 """
 review_by = "2026-12-31"
 
@@ -191,23 +168,12 @@ review_by = "2026-12-31"
 # Arrived on 2026-09-30, published overnight against the base image. The other
 # four Radar recorded them before their tags went out; exeradar was not released
 # that day, so the gate refused the next push to main instead — which is the
-# gate working. Both positions were read out of the Debian security tracker with
-# `patchradar debian`, not from the scanners' one-line summaries, and the two are
-# in different situations.
+# gate working. The position was read out of the Debian security tracker with
+# `patchradar debian` and not from the scanner's one-line summary.
+#
+# The openssl finding that arrived with it, CVE-2026-84782, was never an
+# acceptance but a rebuild, and the rebuild happened: removed on 2026-10-02.
 # ─────────────────────────────────────────────────────────────────────────────
-
-[[exception]]
-id = "CVE-2026-84782"
-source = "Docker Scout"
-where = "openssl 3.5.7-1~deb13u2 in the published image; fixed in Debian 3.5.7-1~deb13u3"
-why = """
-An out-of-bounds read in OpenSSL's DTLS retransmission, advisory published 2026-09-29. Debian has already fixed it: `patchradar debian CVE-2026-84782` reports it resolved in trixie at openssl 3.5.7-1~deb13u3, so this is not an acceptance — it is a rebuild.
-
-The Dockerfile runs `apt-get update && apt-get upgrade -y`, so the next image built picks the fix up with no change to this repository. Docker Scout reads the image published on Docker Hub, which is why the alert stays open until then. The short date is the check that the publish happened: if this is still here afterwards, either the image was not republished or the upgrade did not take.
-
-Reachability, for what it is worth: the flaw is in DTLS, and exeradar speaks no datagram TLS. It opens no sockets at all while examining a binary; the one thing that reaches the network is law_fetcher, fetching legal texts from EUR-Lex and Normattiva over HTTPS on TCP.
-"""
-review_by = "2026-10-31"
 
 [[exception]]
 id = "SNYK-DEBIAN13-GCC14-20335537"

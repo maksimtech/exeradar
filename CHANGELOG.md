@@ -77,6 +77,43 @@ no version in this file has ever matched — 40 is not a month, and
   modules added in earlier commits were missing from it and one that does not exist
   was in it.
 
+### Removed
+
+- **Four settled entries out of `SECURITY-EXCEPTIONS.toml`, and the fifth kept on
+  purpose.** The gate has been reporting five exceptions whose finding nobody
+  reports any more, and the difference between them is the whole decision.
+
+  `CVE-2025-47273`, `CVE-2026-57585`, `GHSA-6v7p-g79w-8964` and `CVE-2026-84782`
+  were all closed by GitHub at **2026-09-30T19:26:53Z** — one timestamp, which is
+  the republish — and Docker Scout has run six times since without mentioning any
+  of them. The absence is explained in both cases: the first three were copies
+  vendored under `pip/_vendor/`, which the Dockerfile removes along with the rest
+  of the build tooling, and the fourth was openssl, which
+  `patchradar debian CVE-2026-84782` reports resolved in trixie at
+  `3.5.7-1~deb13u3` and which `apt-get upgrade` picked up at the rebuild. Each was
+  written as "closes when the next image is published"; it was published, so they
+  are gone. Their return would mean a fix regressed, which is worth a build
+  failing over.
+
+  `CVE-2026-82560` stays, and **not** because its silence is shorter — it is
+  longer. That alert closed at 2026-09-29T15:08:22Z, a different and earlier
+  moment, with nothing done to the image in between, and the absence has held
+  across eleven Scout runs over three days against the other four's six. The
+  deciding fact is elsewhere: `patchradar debian CVE-2026-82560` on 2026-10-02
+  still reports `perl` no-dsa in trixie at `5.40.1-6+deb13u1`, no fix in any
+  suite, Debian bug 1148455. perl-base is still installed and still unfixed; only
+  the reporting changed, and Scout has already changed its mind about this exact
+  id once — which is why the gate reads closed alerts at all. Deleting a flaw that
+  is demonstrably present because a scanner fell silent is the one direction this
+  file must not drift in, so the entry now says so in writing.
+
+  `tests/docker/inspect.sh` keeps its pip/setuptools probe and gains the reason:
+  with those three entries gone, that probe is the only thing that would notice
+  the removal regressing.
+
+  Fourteen entries down to ten. The gate still passes, which was checked by
+  running it locally against this repository's live alerts and not by inference.
+
 ### Changed
 
 - **`README.md`'s `analyze` transcript is regenerated from the tool.** It was a

@@ -6,9 +6,11 @@
 #
 # 1. Is the build tooling gone? The Dockerfile removes pip, setuptools and wheel
 #    after installing exeradar, because CVE-2025-47273, CVE-2026-57585 and
-#    GHSA-6v7p-g79w-8964 are reported against copies vendored *inside* them, at
-#    `pip/_vendor/`, where no pin can reach. If they are still here the fix did
-#    not work, and the record says it did.
+#    GHSA-6v7p-g79w-8964 were reported against copies vendored *inside* them, at
+#    `pip/_vendor/`, where no pin can reach. Those three closed when the image was
+#    republished on 2026-09-30 and their entries were removed on 2026-10-02, which
+#    makes this probe the thing that would notice them coming back: nothing else
+#    watches for the removal regressing.
 #
 # 2. Which perl is installed? Docker Scout names the *source* package for
 #    CVE-2026-82560, and Debian's `perl` source produces `perl-base` — Essential,
