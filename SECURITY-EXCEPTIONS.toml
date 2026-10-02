@@ -219,3 +219,86 @@ CVE-2026-102010. Open in trixie for both gcc-12 (12.4.0-5) and gcc-14 (14.2.0-19
 Nor is it removable here, and less so than anywhere else among the five. Snyk names the source package `gcc-14`; what is installed is `libstdc++6`, the C++ runtime — and exeradar's own parser is LIEF, a C++ library. Removing it would leave an image that cannot read a PE file.
 """
 review_by = "2026-12-31"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# gcc, as reported on 2026-10-02 — and the same flaw arrives twice, because the
+# two scanners name it differently. SNYK-DEBIAN13-GCC14-20335537 has been
+# recorded since 2026-09-30; Docker Scout reports that identical flaw as
+# CVE-2026-102010, and this file matches by id, so it needs its own entry. zlib
+# has had two entries for one flaw since September for exactly this reason.
+#
+# An entry is never written ahead of the alert: one that matches nothing fails
+# the build too, and that is deliberate — a record of findings nobody is
+# reporting is how a record stops describing the product. apkradar, mailradar and
+# cookieradar hold the Snyk id and not the Scout one today; when Scout reports it
+# there, they get an entry then.
+#
+# Both positions read with `patchradar debian`, not from the scanners' one line:
+# open in trixie for gcc-12 (12.4.0-5) and gcc-14 (14.2.0-19), no fixed version
+# in any suite, no Debian bug recorded. Nothing to wait for and nothing to ask
+# for; what moves a flaw in this state is evidence on the tracker page.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[exception]]
+id = "CVE-2026-102010"
+source = "Docker Scout"
+where = "gcc-14 / libstdc++6 14.2.0-19, python slim-trixie base image"
+why = """
+The same flaw already recorded here as SNYK-DEBIAN13-GCC14-20335537, reported by \
+the other scanner under its CVE number. Open in trixie for gcc-12 and gcc-14 with \
+no fixed version in any suite and no Debian bug — checked with \
+`patchradar debian CVE-2026-102010`. There is nothing to wait for and nothing to \
+ask for; what moves it is evidence on \
+https://security-tracker.debian.org/tracker/CVE-2026-102010.
+
+Two entries for one flaw is not duplication: the gate matches by id, and an id \
+with no entry fails the build whichever scanner emitted it. zlib has been in the \
+same position since September.
+"""
+review_by = "2026-12-31"
+
+[[exception]]
+id = "SNYK-DEBIAN13-GCC14-20386241"
+source = "Snyk Container"
+where = "gcc-14 / libstdc++6 14.2.0-19, python slim-trixie base image"
+why = """
+CVE-2026-95619, an integer overflow in gcc-14, published against the base image \
+on 2026-10-02. Read with `patchradar debian CVE-2026-95619`: open in trixie \
+for gcc-12 (12.4.0-5) and gcc-14 (14.2.0-19), no fixed version in any suite, no \
+Debian bug recorded. So there is nothing to wait for and nothing to ask for, and \
+the tracker page is where evidence goes: \
+https://security-tracker.debian.org/tracker/CVE-2026-95619.
+
+What is *not* established, and is worth saying rather than glossing: Snyk names \
+the source package `gcc-14`, and Debian's gcc source produces both the compiler \
+and `libstdc++6`, the runtime LIEF is built against. A flaw in cc1 needs \
+something to compile and nothing in this image compiles anything; a flaw in the \
+runtime is a different exposure. Which binary package is installed had been \
+asserted and not measured, so `tests/docker/inspect.sh` now prints the gcc and \
+libstdc++ packages and the next `docker-build-check` run answers it.
+"""
+review_by = "2026-12-31"
+
+[[exception]]
+id = "CVE-2026-95619"
+source = "Docker Scout"
+where = "gcc-14 / libstdc++6 14.2.0-19, python slim-trixie base image"
+why = """
+CVE-2026-95619, an integer overflow in gcc-14, published against the base image \
+on 2026-10-02. The same flaw as SNYK-DEBIAN13-GCC14-20386241 above, under the
+other scanner's id. Read with `patchradar debian CVE-2026-95619`: open in trixie \
+for gcc-12 (12.4.0-5) and gcc-14 (14.2.0-19), no fixed version in any suite, no \
+Debian bug recorded. So there is nothing to wait for and nothing to ask for, and \
+the tracker page is where evidence goes: \
+https://security-tracker.debian.org/tracker/CVE-2026-95619.
+
+What is *not* established, and is worth saying rather than glossing: Snyk names \
+the source package `gcc-14`, and Debian's gcc source produces both the compiler \
+and `libstdc++6`, the runtime LIEF is built against. A flaw in cc1 needs \
+something to compile and nothing in this image compiles anything; a flaw in the \
+runtime is a different exposure. Which binary package is installed had been \
+asserted and not measured, so `tests/docker/inspect.sh` now prints the gcc and \
+libstdc++ packages and the next `docker-build-check` run answers it.
+"""
+review_by = "2026-12-31"
