@@ -13,6 +13,8 @@ no version in this file has ever matched — 40 is not a month, and
 ## [Unreleased]
 
 
+## [2026.41] - 2026-10-03
+
 ### Added
 
 - **Library versions, read out of the strings: a new `libraries.py` and a
