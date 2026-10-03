@@ -71,6 +71,20 @@ def test_the_suite_skips_them_rather_than_needing_their_runner():
     assert "--ignore=tests/benchmarks" in workflow
 
 
+def test_the_mutation_run_skips_them_as_well():
+    """`mutation.yml` is the other workflow that runs the suite, and it was the
+    one nobody had written down: on 2026-10-03 the Saturday run died in the stats
+    phase on the missing fixture, before a single mutant was tried.
+
+    mutmut takes no pytest arguments on its command line, so the exclusion lives
+    in its configuration rather than in the workflow file — which is why asserting
+    on the workflow, as the test above does, could not have caught this.
+    """
+    config = PYPROJECT.read_text(encoding="utf-8")
+
+    assert "--ignore=tests/benchmarks" in config.split("[tool.mutmut]", 1)[1]
+
+
 def test_the_runner_is_not_a_project_dependency():
     """pytest-codspeed is installed by codspeed.yml and nowhere else, as in the
     other three. Declaring it would put a benchmark tool in the way of finding
