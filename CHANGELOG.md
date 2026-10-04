@@ -12,6 +12,26 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Added
+
+- **A release script, which this repository never had.** The other four Radar release
+  through `release.sh` or `scripts/bump_version.py`; here `__version__` was edited by
+  hand, committed, tagged and pushed. That is why the suite gate the other four were
+  given had nowhere to live: there was nothing to put it in. Ported from cookieradar,
+  where the script and its cases were written, with the version file and the product
+  name changed and nothing else.
+
+  What it refuses: a version that is not `YYYY.count[.fix]`, a middle segment that
+  reads as a month, the version already in `__init__.py`, a branch other than `main`,
+  a dirty tree, a local `main` out of step with the remote, and a tag that exists
+  either side. Then it bumps, **runs the suite with the new version in place**, and
+  commits only if it passes — `publish.yml` already checks that the tag matches
+  `v$VERSION`, so the two halves agree.
+
+  23 cases hold it, and five mutations were checked against them: the gate removed,
+  the version check disabled, a dirty tree allowed, an existing tag no longer
+  stopping anything, and the push no longer atomic. All five fail.
+
 
 ## [2026.41] - 2026-10-03
 
