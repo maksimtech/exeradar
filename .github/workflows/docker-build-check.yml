@@ -3,7 +3,15 @@ name: Docker Build Check
 # pushing anything. The release workflow, when it exists, will publish to
 # Docker Hub including :latest, so there has to be a way to try a Dockerfile
 # change out that does not publish one.
+# On every change, not only when somebody remembers. Until it was, the only thing
+# that built this image automatically was docker.yml — on a tag, pushing as it went —
+# so the first attempt at a build was the one that published it. This image is built
+# from the checkout with nothing to resolve, so there is nothing to stop it.
 on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 permissions:
   contents: read

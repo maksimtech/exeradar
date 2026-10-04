@@ -1,11 +1,16 @@
 name: Build and Push Docker Image
 # The git tag is the trigger, the same one publish.yml and release.yml use.
 #
-# The other four Radar cannot do that: their images install the package from the
-# index inside the Dockerfile, so their docker.yml has to poll until the upload
-# running beside it has propagated — patchradar's 2026.9.4 failed on a fixed
-# `sleep 60` that raced with its own publish. This image installs the checkout,
-# so there is nothing to wait for and no version to agree on with anyone.
+# apkradar, cookieradar and mailradar cannot do that: their images install the
+# package from the index inside the Dockerfile, so their docker.yml has to poll until
+# the upload running beside it has propagated — patchradar's 2026.9.4 failed on a fixed
+# `sleep 60` that raced with its own publish, and apkradar lost the same race fifteen
+# seconds *after* a poll had succeeded, because the runner and the multi-platform build
+# ask different edges of the index.
+#
+# patchradar stopped asking on 2026-10-04 and builds from the tag's source, as this one
+# always has: there is nothing to wait for and no version to agree on with anyone. The
+# other three have not moved yet.
 on:
   push:
     tags:
@@ -21,8 +26,16 @@ jobs:
   docker:
     runs-on: ubuntu-26.04
     steps:
+      # The tag being built, not the default branch. The image is built from this
+      # checkout, so a dispatched rebuild of an older release has to stand on that
+      # release's tag. It did not, and the smoke test below caught the result rather
+      # than letting it publish — comparing the version in the image against the tag
+      # and refusing — so nothing was ever mis-published. What it meant is that
+      # rebuilding an older release could not work at all.
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref }}
       - name: Extract version
         id: version
         env:

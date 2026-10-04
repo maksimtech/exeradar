@@ -49,21 +49,29 @@ def test_the_smoke_test_runs_before_anything_is_pushed():
 
 
 def test_the_published_image_is_built_from_the_tag_not_from_pypi():
-    """The other four Radar install themselves from PyPI inside the image, so
-    their docker.yml has to poll until the release propagates — patchradar's
-    2026.9.4 failed on a fixed `sleep 60` that raced with its own publish.
+    """apkradar, cookieradar and mailradar install themselves from PyPI inside the
+    image, so their docker.yml has to poll until the release propagates —
+    patchradar's 2026.9.4 failed on a fixed `sleep 60` that raced with its own
+    publish, and polling only narrowed it. patchradar stopped asking the index on
+    2026-10-04 and now builds from the tag, as this one always has; the other three
+    have not moved yet.
 
-    This Dockerfile installs the checkout, so there is no propagation to wait
-    for and no version to agree on with PyPI. If that ever changes, this test
-    fails and the wait has to come back with it.
+    This Dockerfile installs the checkout, so there is no propagation to wait for and
+    no version to agree on with PyPI. If that ever changes, this test fails and the
+    wait has to come back with it.
+
+    Where the checkout stands is a separate question, and the answer used to be "the
+    default branch" — see the rebuild case further down.
     """
     assert "pip install --no-cache-dir --root-user-action=ignore /app/src" in (
         DOCKERFILE.read_text(encoding="utf-8")
     )
     assert "wait_for_pypi" not in published()
-    # Nothing to parameterise: the other four pass a source and a version in,
-    # and a build-arg here would mean the image had learned to install itself
-    # from somewhere the tag does not control.
+    # Nothing to parameterise: the three that still install from the index pass a
+    # source and a version in, and a build-arg here would mean the image had learned
+    # to install itself from somewhere the tag does not control. patchradar keeps one
+    # — it has both branches and names the local one — which is a different shape, not
+    # a reason to grow one here.
     assert "build-args" not in published()
 
 
@@ -87,3 +95,50 @@ def test_the_build_check_still_pushes_nothing():
     assert "docker/login-action" not in workflow, (
         "a build check has no business holding Docker Hub credentials"
     )
+
+
+def test_a_rebuild_stands_on_the_tag_it_was_asked_for():
+    """Dispatched with an old tag, this workflow has to check that tag out.
+
+    It did not, and the consequence was milder than it looks, which is why it
+    survived: the image is built from the checkout, so a rebuild of v2026.40 run
+    from the default branch builds whatever main holds — and then the smoke test
+    compares the installed version against the tag and refuses, before the login
+    and before any push. So nothing was ever mis-published.
+
+    What it means is that rebuilding an older release could not work at all. The
+    input exists, the workflow accepts it, and the job fails on a version mismatch
+    that reads like a packaging problem rather than like a checkout standing in the
+    wrong place. patchradar had the same shape with no comparison behind it, where
+    the same omission would have tagged main's code with an old release's number.
+    """
+    workflow = published()
+    checkout = workflow.index("actions/checkout")
+    # To the end of this step, not a fixed window: the step after it extracts the
+    # version and names `inputs.version` for its own reasons, so a window wide enough
+    # to reach it reports a checkout that looks at the input when it does not. Which
+    # is what a 400-character window did here, and what mutating the ref to
+    # `${{ github.ref }}` showed.
+    end = workflow.find("\n      - name:", checkout)
+    step = workflow[checkout:end if end != -1 else len(workflow)]
+
+    assert "ref:" in step, "the checkout does not say which ref to stand on"
+    assert "inputs.version" in step, (
+        "a dispatched rebuild has to stand on the version it was given"
+    )
+
+
+def test_the_build_check_runs_on_its_own():
+    """Otherwise the only thing that builds this image is the workflow that
+    publishes it, and the first attempt at a build is the one that releases.
+
+    This image is built from the checkout with no arguments to resolve, so there is
+    nothing stopping it from being built on every change — unlike apkradar and
+    mailradar, whose build check needs a published version handed to it because
+    their Dockerfiles install from the index.
+    """
+    workflow = BUILD_CHECK.read_text(encoding="utf-8")
+    triggers = workflow[workflow.index("\non:"):workflow.index("permissions:")]
+
+    assert "pull_request" in triggers, "a change that breaks the image should say so in its PR"
+    assert "push" in triggers, "and on main, because that is what the next release builds"

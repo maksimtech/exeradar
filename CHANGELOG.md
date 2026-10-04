@@ -12,6 +12,40 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Fixed
+
+- **A dispatched rebuild now stands on the tag it was given.** `docker.yml` can be run by
+  hand with the tag of an already published release to rebuild it, and it checked out the
+  default branch — while the image is built from that checkout.
+
+  The consequence was milder than it sounds, which is why it survived: the smoke test
+  compares the version inside the image against the tag and runs on a `push: false`
+  build, before the login and before anything is pushed, so a rebuild of `v2026.40` from
+  a `main` holding 2026.41 failed rather than publishing the wrong code. What it meant is
+  that rebuilding an older release could not work at all, and failed with a version
+  mismatch that reads like a packaging problem rather than like a checkout standing in
+  the wrong place. patchradar had the same omission on 2026-10-04 with no comparison
+  behind it, where it would have tagged `main`'s code with an old release's number.
+
+- **The image is built on every push and pull request, not only when asked.**
+  `docker-build-check.yml` was reachable by hand alone, so the only thing that built this
+  image automatically was `docker.yml` — on a tag, pushing as it went. The first attempt
+  at a build was the one that published it. Nothing stopped it from running on every
+  change: this image is built from the checkout with no version to resolve, unlike
+  apkradar's and mailradar's, whose build check has to be handed a published version
+  because their Dockerfiles install from the index.
+
+- **Three comments that said "the other four Radar install from PyPI".** patchradar
+  stopped on 2026-10-04 and builds from the tag's source, as this one always has. Three
+  of four now, and the difference matters, because those comments are what somebody will
+  read when deciding what to do about the remaining ones.
+
+  Four mutations hold the two new cases. One of them did not fail at first: the case read
+  a fixed 400-character window after `actions/checkout`, which reaches into the step that
+  extracts the version and names `inputs.version` for its own reasons — so a checkout
+  that ignored the input looked like one that used it. The window now ends where the step
+  ends.
+
 ### Added
 
 - **A release script, which this repository never had.** The other four Radar release
