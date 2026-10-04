@@ -197,6 +197,12 @@ Alongside [apkradar](https://github.com/maksimtech/apkradar),
 [cookieradar](https://github.com/maksimtech/cookieradar) and
 [patchradar](https://github.com/maksimtech/patchradar).
 
+## How this is built
+
+Developed with [Claude Code](https://claude.com/claude-code), reviewed and released by
+[maksimtech](https://github.com/maksimtech). The suite is the contract: every change
+lands with it green.
+
 ## Licence
 
 MIT.
