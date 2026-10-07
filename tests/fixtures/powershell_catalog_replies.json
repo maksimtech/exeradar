@@ -1,0 +1,28 @@
+{
+  "_recorded": "What Windows PowerShell 5.1.26100.9444 answered on Windows 11 Pro 10.0.26300.9457 on 2026-10-07, asked through signature._ask_powershell: the exit code and stdout exactly as returned. stderr is not kept: it names paths on the recording machine and nothing reads it. On Windows, test_the_recorded_replies_are_what_powershell_answers_today asks again.",
+  "catalog": {
+    "file": "C:\\Windows\\System32\\notepad.exe (the catalog_pe_path fixture)",
+    "returncode": 0,
+    "stdout": "{\"Status\":\"Valid\",\"Type\":\"Catalog\",\"Signer\":\"CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\",\"Stamper\":\"CN=Microsoft Time-Stamp Service, OU=nShield TSS ESN:8603-05E0-D947, OU=Microsoft America Operations, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\"}\n"
+  },
+  "embedded": {
+    "file": "tests/fixtures/python.exe",
+    "returncode": 0,
+    "stdout": "{\"Status\":\"Valid\",\"Type\":\"Authenticode\",\"Signer\":\"CN=Python Software Foundation, O=Python Software Foundation, L=Beaverton, S=Oregon, C=US\",\"Stamper\":\"CN=Microsoft Public RSA Time Stamping Authority, OU=nShield TSS ESN:7D00-05E0-D947, OU=Microsoft America Operations, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\"}\n"
+  },
+  "unsigned": {
+    "file": "tests/fixtures/python.exe with its certificate table entry zeroed (the unsigned_pe_path fixture)",
+    "returncode": 0,
+    "stdout": "{\"Status\":\"NotSigned\",\"Type\":\"None\",\"Signer\":\"\",\"Stamper\":\"\"}\n"
+  },
+  "missing": {
+    "file": "a path where there is no file",
+    "returncode": 1,
+    "stdout": ""
+  },
+  "pipe": {
+    "file": "tests/fixtures/python.exe with its signer's CN rewritten as `Contoso|Fabrikam Code Sign` (_with_signer)",
+    "returncode": 0,
+    "stdout": "{\"Status\":\"UnknownError\",\"Type\":\"Authenticode\",\"Signer\":\"CN=Contoso|Fabrikam Code Sign, O=Python Software Foundation, L=Beaverton, S=Oregon, C=US\",\"Stamper\":\"CN=Microsoft Public RSA Time Stamping Authority, OU=nShield TSS ESN:7D00-05E0-D947, OU=Microsoft America Operations, O=Microsoft Corporation, L=Redmond, S=Washington, C=US\"}\n"
+  }
+}

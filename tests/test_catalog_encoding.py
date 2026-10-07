@@ -19,11 +19,18 @@ which on an Italian Windows is cp1252. Three things follow:
 
 Found on 2026-09-24, the same family as the cp1252 console crash already in the
 backlog, on the input side.
+
+Where these cases need an answer from PowerShell they ask the real one, about
+real files, and are skipped where there is none. What decides on an answer is
+also fed, on every platform, the answers PowerShell gave to the same call,
+recorded in tests/fixtures/powershell_catalog_replies.json; on Windows one case
+asks again, so a recording that stops being true fails rather than lingers.
 """
 
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -31,10 +38,47 @@ from pathlib import Path
 import pytest
 
 from exeradar import signature
+from exeradar.models import SignatureState
 
-# A real one: the Subject of a CA that does not fit in cp1252.
-CHINESE_CA = "CN=沃通根证书, O=WoSign CA Limited, C=CN"
-GERMAN_CA = "CN=Müller Sicherheit GmbH, O=Bundesdruckerei, C=DE"
+FIXTURES = Path(__file__).parent / "fixtures"
+REPLIES = json.loads((FIXTURES / "powershell_catalog_replies.json").read_text(encoding="utf-8"))
+
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="path B is Windows PowerShell")
+
+# Names a certificate can carry, each exactly the 26 bytes `_with_signer` has
+# room for. 沃通根证书 is WoSign's root CA, a real Subject that does not fit in
+# cp1252; the German one fits cp1252 and not ASCII.
+CHINESE_CN = "沃通根证书 WoSign Ltd"
+GERMAN_CN = "Müller Sicherheit GmbH KG"
+PIPE_CN = "Contoso|Fabrikam Code Sign"
+# The rest of the signer's Subject in tests/fixtures/python.exe.
+REST_OF_SUBJECT = "O=Python Software Foundation, L=Beaverton, S=Oregon, C=US"
+
+# The CN of python.exe's signing certificate: OID 2.5.4.3, a PrintableString of 26 bytes.
+_SIGNER_CN = b"\x06\x03U\x04\x03\x13\x1aPython Software Foundation"
+
+
+def _with_signer(tmp_path: Path, cn: str) -> Path:
+    """tests/fixtures/python.exe, signed by a certificate whose CN is `cn`.
+
+    Derived data: the recorded file with that one PrintableString rewritten as a
+    UTF8String of the same length, so that no length around it changes; every
+    other byte is as recorded. The certificate's own signature no longer
+    matches and Windows answers UnknownError, but it reads and prints the
+    Subject, which is all these cases need.
+    """
+    raw = cn.encode("utf-8")
+    assert len(raw) == 26, f"{cn!r} is {len(raw)} bytes; the field holds 26"
+    data = (FIXTURES / "python.exe").read_bytes()
+    assert data.count(_SIGNER_CN) == 1
+    target = tmp_path / "resigned.exe"
+    target.write_bytes(data.replace(_SIGNER_CN, b"\x06\x03U\x04\x03\x0c\x1a" + raw))
+    return target
+
+
+def _replied(name: str) -> tuple[int, str]:
+    """A recorded answer, as `_catalog_answer` takes it."""
+    return REPLIES[name]["returncode"], REPLIES[name]["stdout"]
 
 
 class _Completed:
@@ -44,22 +88,20 @@ class _Completed:
         self.returncode = returncode
 
 
-def _answer(status, kind, signer="", stamper=""):
-    """What the script prints: one JSON object, the way ConvertTo-Json writes it."""
-    return json.dumps({"Status": status, "Type": kind, "Signer": signer, "Stamper": stamper},
-                      ensure_ascii=False)
-
-
 @pytest.fixture
 def powershell(monkeypatch):
-    """Stand in for PowerShell, and record how it was called."""
+    """Stand in for PowerShell, and record how it was called.
+
+    Used only by the cases that predate the answer in JSON. What it answers is
+    what the real PowerShell said about a catalog-signed file.
+    """
     calls = []
 
     def fake_run(argv, **kwargs):
         calls.append({"argv": argv, "kwargs": kwargs})
         return fake_run.result
 
-    fake_run.result = _Completed(_answer("Valid", "Catalog", "CN=Test, O=Test"))
+    fake_run.result = _Completed(REPLIES["catalog"]["stdout"])
     monkeypatch.setattr(subprocess, "run", fake_run)
     return fake_run, calls
 
@@ -120,177 +162,160 @@ def test_powershell_is_told_to_write_utf8(powershell):
     assert "UTF8" in script, script
 
 
-@pytest.mark.parametrize("subject", [CHINESE_CA, GERMAN_CA])
-def test_a_non_cp1252_signer_survives_the_round_trip(powershell, subject):
-    """The name the CA chose is the name the report must print."""
-    fake_run, _ = powershell
-    fake_run.result = _Completed(_answer("Valid", "Catalog", subject))
+@windows_only
+@pytest.mark.parametrize("cn", [CHINESE_CN, GERMAN_CN])
+def test_a_non_cp1252_signer_survives_the_round_trip(cn, tmp_path):
+    """The name the CA chose is the name the report must print.
 
-    result = signature._catalog(Path("whatever.exe"))
+    Asked of the real PowerShell about a certificate that carries the name, so
+    that both halves of the encoding — PowerShell writing, Python reading — are
+    the ones in use.
+    """
+    completed = signature._ask_powershell(_with_signer(tmp_path, cn))
 
-    assert result is not None
-    assert result.signer == subject
+    assert completed.returncode == 0, completed.stderr
+    assert signature._catalog_fields(completed.stdout)["Signer"] == f"CN={cn}, {REST_OF_SUBJECT}"
 
 
-def test_a_pipe_in_the_subject_does_not_shift_the_fields(powershell):
+def test_a_pipe_in_the_subject_does_not_shift_the_fields():
     """A Subject can contain `|`, as in O=Contoso|Fabrikam. The answer used to be
     four fields joined by `|`, so half the signer's name became the timestamper.
 
     No separator in plain text is safe from a Subject, which can hold a line
-    break as well; the script answers in JSON, and this is that answer.
+    break as well; the script answers in JSON, and this is the answer the real
+    PowerShell gave about a certificate whose CN holds the separator.
     """
-    fake_run, _ = powershell
-    fake_run.result = _Completed(
-        _answer("Valid", "Catalog", "CN=Contoso, O=Contoso|Fabrikam", "CN=Contoso TSA") + "\n"
-    )
+    fields = signature._catalog_fields(REPLIES["pipe"]["stdout"])
 
-    result = signature._catalog(Path("whatever.exe"))
-
-    assert result is not None
-    assert result.signer == "CN=Contoso, O=Contoso|Fabrikam"
-    assert result.timestamper == "CN=Contoso TSA"
+    assert fields["Signer"] == f"CN={PIPE_CN}, {REST_OF_SUBJECT}"
+    assert fields["Stamper"].startswith("CN=Microsoft Public RSA Time Stamping Authority, ")
 
 
 # ── what was already true, and must stay true ───────────────────────────────
 
 
-def test_a_status_other_than_valid_is_not_a_signature(powershell):
-    fake_run, _ = powershell
-    fake_run.result = _Completed(_answer("NotSigned", "None"))
+def test_a_catalog_answer_is_a_catalog_signature():
+    """The one answer path B exists for, so that the refusals below refuse
+    something that would otherwise be accepted."""
+    found = signature._catalog_answer(*_replied("catalog"))
 
-    assert signature._catalog(Path("whatever.exe")) is None
-
-
-def test_an_embedded_signature_is_not_claimed_as_a_catalog_one(powershell):
-    """Only SignatureType Catalog belongs to path B."""
-    fake_run, _ = powershell
-    fake_run.result = _Completed(_answer("Valid", "Embedded", "CN=Test"))
-
-    assert signature._catalog(Path("whatever.exe")) is None
+    assert found is not None
+    assert found.state is SignatureState.CATALOG and found.verified is True
+    assert found.signer == "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 
 
-def test_a_non_zero_exit_is_not_a_signature(powershell):
-    fake_run, _ = powershell
-    fake_run.result = _Completed(_answer("Valid", "Catalog", "CN=Test"), returncode=1)
-
-    assert signature._catalog(Path("whatever.exe")) is None
+def test_a_status_other_than_valid_is_not_a_signature():
+    assert signature._catalog_fields(REPLIES["unsigned"]["stdout"])["Status"] == "NotSigned"
+    assert signature._catalog_answer(*_replied("unsigned")) is None
 
 
-def test_the_path_is_quoted_so_it_cannot_close_the_literal(powershell):
-    """The filename is not in the script at all, so no quote in it can close anything.
+def test_an_embedded_signature_is_not_claimed_as_a_catalog_one():
+    """Only SignatureType Catalog belongs to path B: a valid embedded signature
+    is path A's to report."""
+    fields = signature._catalog_fields(REPLIES["embedded"]["stdout"])
 
-    Doubling the ASCII quote was the escape until 2026-10-07, and PowerShell closes
-    a single-quoted literal on four other characters too (U+2018 to U+201B). The
-    path now reaches PowerShell as data, through the environment, and intact.
+    assert (fields["Status"], fields["Type"]) == ("Valid", "Authenticode")
+    assert signature._catalog_answer(*_replied("embedded")) is None
+
+
+def test_a_non_zero_exit_is_not_a_signature():
+    assert REPLIES["missing"]["returncode"] != 0
+    assert signature._catalog_answer(*_replied("missing")) is None
+
+
+@windows_only
+def test_the_recorded_replies_are_what_powershell_answers_today(request, tmp_path):
+    """The replies above were recorded once; this asks again about the same files.
+
+    Exactly, except for the catalog-signed file, which belongs to Windows: an
+    update re-stamps its catalog, so its timestamper is not compared.
     """
-    _, calls = powershell
-    path = Path("it's here’.exe")
-    signature._catalog(path)
+    asked = {
+        "catalog": request.getfixturevalue("catalog_pe_path"),
+        "embedded": FIXTURES / "python.exe",
+        "unsigned": request.getfixturevalue("unsigned_pe_path"),
+        "missing": tmp_path / "missing.exe",
+        "pipe": _with_signer(tmp_path, PIPE_CN),
+    }
+    assert set(asked) == set(REPLIES) - {"_recorded"}
 
-    script = calls[0]["argv"][-1]
-    assert "here" not in script, script
-    assert calls[0]["kwargs"]["env"][signature._TARGET_VARIABLE] == str(path)
+    for name, path in asked.items():
+        completed = signature._ask_powershell(path)
+        recorded = REPLIES[name]
+        assert completed.returncode == recorded["returncode"], name
+        if name == "catalog":
+            today = signature._catalog_fields(completed.stdout)
+            then = signature._catalog_fields(recorded["stdout"])
+            del today["Stamper"], then["Stamper"]
+            assert today == then, name
+        else:
+            assert completed.stdout == recorded["stdout"], name
 
 
 # ── the filename is data, never code ────────────────────────────────────────
 
-# PowerShell takes U+2018, U+2019, U+201A and U+201B for a single quote as well.
-_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
-
 # Legal on NTFS. With only the ASCII quote doubled, U+2019 closed the literal
 # and the rest of the name ran as PowerShell, with the user's rights.
-INJECTION = "C:\\tmp\\a\u2019; Write-Output PWNED; \u2019b.exe"
-
-# Captured before any test replaces it, for the one test that parses for real.
-_REAL_RUN = subprocess.run
+INJECTION = "a’; Write-Output PWNED; ’b.exe"
 
 
-def _single_quoted_literal(script: str, after: str) -> str:
-    """The value of the single-quoted literal after `after`, read the way
-    PowerShell's tokenizer reads it: a doubled quote is a literal quote."""
-    i = script.index(after) + len(after)
-    assert script[i] in _SINGLE_QUOTES
-    i += 1
-    out = []
-    while i < len(script):
-        ch = script[i]
-        if ch in _SINGLE_QUOTES:
-            if i + 1 < len(script) and script[i + 1] in _SINGLE_QUOTES:
-                out.append(ch)
-                i += 2
-                continue
-            return "".join(out)
-        out.append(ch)
-        i += 1
-    raise AssertionError("unterminated literal")
+def _catalog_signed_copy(catalog_pe_path: Path, target: Path) -> Path:
+    """A catalog signature is looked up by the file's hash, so a copy keeps it,
+    whatever it is called and wherever it is."""
+    shutil.copy(catalog_pe_path, target)
+    return target
 
 
-def test_a_typographic_quote_in_the_name_cannot_close_the_literal(powershell):
-    """Two fixes are sound, and this admits both: the path stays out of the
-    script and reaches PowerShell as data (environment or argument), or it stays
-    in as one literal whose value is exactly the path. A literal that closes
-    early is the one thing refused."""
-    _, calls = powershell
-    signature._catalog(Path(INJECTION))
+@windows_only
+def test_a_name_with_quotes_reaches_powershell_intact(catalog_pe_path, tmp_path):
+    """The filename is not in the script at all, so no quote in it can close anything.
 
-    argv, kwargs = calls[0]["argv"], calls[0]["kwargs"]
-    script = argv[-1]
-    if "PWNED" in script:
-        assert _single_quoted_literal(script, "-LiteralPath ") == INJECTION
-    else:
-        assert INJECTION in [*argv, *(kwargs.get("env") or {}).values()]
+    Doubling the ASCII quote was the escape until 2026-10-07, and PowerShell closes
+    a single-quoted literal on four other characters too (U+2018 to U+201B). The
+    path now reaches PowerShell as data, through the environment, and intact:
+    the file it names is the one Windows finds in its catalog.
+    """
+    target = _catalog_signed_copy(catalog_pe_path, tmp_path / "it's here’.exe")
 
+    found = signature._catalog(target)
 
-def _command_names(script: str, tmp_path: Path, name: str) -> list[str]:
-    """The commands in `script`, by PowerShell's own parser: parsed, never run."""
-    script_file = tmp_path / f"{name}.ps1"
-    script_file.write_text(script, encoding="utf-8-sig")
-    lister = tmp_path / "list.ps1"
-    lister.write_text(
-        "param($p)\n"
-        "$t=$null;$e=$null\n"
-        "$ast=[System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$t,[ref]$e)\n"
-        "$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true)"
-        " | ForEach-Object { $_.GetCommandName() }\n",
-        encoding="utf-8-sig",
-    )
-    try:
-        parsed = _REAL_RUN(
-            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-             "-File", str(lister), str(script_file)],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
-        )
-    except OSError:
-        pytest.skip("PowerShell is not available")
-    return [line.strip() for line in parsed.stdout.splitlines() if line.strip()]
+    assert found is not None and found.state is SignatureState.CATALOG
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="needs PowerShell's parser")
-def test_the_name_adds_no_command_by_powershell_s_own_parser(powershell, tmp_path):
-    """Checked against the real parser, without running anything. The commands
-    are compared with those of the script built for a harmless name rather than
-    with a list written here, so the test does not depend on how the script
-    formats its answer."""
-    _, calls = powershell
-    signature._catalog(Path(INJECTION))
-    signature._catalog(Path("C:\\tmp\\plain.exe"))
+@windows_only
+def test_a_typographic_quote_in_the_name_cannot_close_the_literal(catalog_pe_path, tmp_path):
+    """A name built to close the literal early and run a command is one value,
+    and the file it names is found."""
+    target = _catalog_signed_copy(catalog_pe_path, tmp_path / INJECTION)
 
-    commands = _command_names(calls[0]["argv"][-1], tmp_path, "injected")
-    expected = _command_names(calls[1]["argv"][-1], tmp_path, "plain")
+    found = signature._catalog(target)
 
-    assert "Get-AuthenticodeSignature" in expected, expected
-    assert "Write-Output" not in commands, commands
-    assert commands == expected, commands
+    assert found is not None and found.state is SignatureState.CATALOG
 
 
-# ── the real PowerShell: what `_catalog_answer` relies on ───────────────────
+@windows_only
+def test_the_name_runs_no_command(catalog_pe_path, tmp_path, monkeypatch):
+    """Checked by running it. `a` exists, so a literal closed at the quote would
+    name a real file and PowerShell would go on to `ni pwned`, which creates
+    `pwned` in the working directory: that is what happened while the path was
+    part of the script."""
+    _catalog_signed_copy(catalog_pe_path, tmp_path / "a")
+    target = _catalog_signed_copy(catalog_pe_path, tmp_path / "a’; ni pwned; ’b.exe")
+    monkeypatch.chdir(tmp_path)
 
-# The not-JSON and not-an-object branches were taken out of `_catalog_answer`
+    found = signature._catalog(target)
+
+    assert not (tmp_path / "pwned").exists()
+    assert found is not None and found.state is SignatureState.CATALOG
+
+
+# ── the real PowerShell: what `_catalog_fields` relies on ───────────────────
+
+# The not-JSON and not-an-object branches were taken out of `_catalog_fields`
 # because the script cannot reach them: exit 0 comes with one JSON object, and
 # every failure is a non-zero exit with nothing on stdout. That is a claim about
 # PowerShell, so it is asked of PowerShell, and only Windows has the one that
 # answers it.
-windows_only = pytest.mark.skipif(sys.platform != "win32", reason="path B is Windows PowerShell")
 
 _FIELDS = ["Status", "Type", "Signer", "Stamper"]
 
@@ -299,19 +324,18 @@ _FIELDS = ["Status", "Type", "Signer", "Stamper"]
 def denied(tmp_path):
     """A file this user may not read: an ACL deny entry, removed afterwards."""
     import os
-    import shutil
 
     target = tmp_path / "denied.exe"
     shutil.copy(Path(sys.executable), target)
     who = os.environ.get("USERNAME", "")
-    made = _REAL_RUN(["icacls", str(target), "/deny", f"{who}:(R)"],
-                     capture_output=True, text=True, encoding="utf-8", errors="replace")
+    made = subprocess.run(["icacls", str(target), "/deny", f"{who}:(R)"],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
     if made.returncode != 0:
         pytest.skip(f"icacls could not deny read: {made.stdout}{made.stderr}")
     try:
         yield target
     finally:
-        _REAL_RUN(["icacls", str(target), "/remove:d", who], capture_output=True)
+        subprocess.run(["icacls", str(target), "/remove:d", who], capture_output=True)
 
 
 @windows_only
@@ -362,8 +386,6 @@ def test_every_failure_is_a_non_zero_exit_with_nothing_on_stdout(kind, request, 
 def test_no_powershell_is_no_answer(unsigned_pe_path):
     """A machine without PowerShell cannot be asked: "I could not tell", the
     reply to every failure of path B, and not a traceback."""
-    import shutil
-
     if shutil.which("powershell"):
         pytest.skip("PowerShell is installed here")
 

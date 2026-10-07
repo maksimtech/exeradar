@@ -29,11 +29,15 @@ The payloads below are trimmed copies of what the live API returned on
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
+import httpx
 import pytest
 
 from exeradar import first_teams
 from exeradar.first_teams import FirstLookupError, Team
+
+FIXTURES = Path(__file__).parent / "fixtures"
 
 HP_INC = {
     "id": "hp_inc-psrt",
@@ -204,19 +208,39 @@ def test_resolve_refuses_to_guess_when_nothing_matches_exactly():
     assert "exact" in resolution.reason.lower()
 
 
+def _replaying(recording: Path, *, query: str) -> httpx.Client:
+    """A real httpx client whose transport answers with a recorded response.
+
+    The module builds the request and httpx sends it; only the socket is
+    replaced, by the bytes the live API returned, and only for the request that
+    was recorded — any other is a failure of the test, not an answer.
+    """
+    body = recording.read_bytes()
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        asked = (str(request.url.copy_with(query=None)), request.url.params.get("q"))
+        assert asked == (first_teams.TEAMS_URL, query), request.url
+        return httpx.Response(200, content=body, headers={"content-type": "application/json; charset=utf-8"})
+
+    return httpx.Client(transport=httpx.MockTransport(answer))
+
+
 def test_resolve_does_not_choose_between_two_exact_matches():
     """The module never chooses between two organisations, nor between two teams
-    of one: an organisation can have a product PSIRT and a corporate CERT, with
-    different addresses and keys, and the first in the response was returned."""
-    acme_psirt = {"id": "acme-psirt", "team": "ACME-PSIRT", "team-full": "ACME Product PSIRT",
-                  "host": "ACME Corp", "email": "psirt@acme.example"}
-    acme_cert = {"id": "acme-cert", "team": "ACME-CERT", "team-full": "ACME Corporate CERT",
-                 "host": "ACME Corp", "email": "cert@acme.example"}
+    of one: an organisation can have more than one member team, with different
+    addresses and keys, and the first in the response was returned.
 
-    resolution = first_teams.resolve("ACME Corp", client=answering(acme_psirt, acme_cert))
+    "EY" is such a name in the directory: the team called EY, hosted by Ernst &
+    Young LLP, and EY CSIRT, hosted by EY. tests/fixtures/first_teams_ey.json is
+    the body api.first.org answered on 2026-10-07 to the request `search` makes
+    for it, `?q=EY&limit=20`, saved as it came.
+    """
+    with _replaying(FIXTURES / "first_teams_ey.json", query="EY") as client:
+        resolution = first_teams.resolve("EY", client=client)
 
     assert resolution.team is None
-    assert len(resolution.candidates) == 2
+    assert {team.id for team in resolution.candidates} == {"ey", "ey_csirt"}
+    assert len({team.email for team in resolution.candidates}) == 2
 
 
 def test_resolve_matches_the_full_team_name_too_and_is_case_insensitive():

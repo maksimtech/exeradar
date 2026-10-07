@@ -106,7 +106,11 @@ def _with_signing_time(time: cms.Time) -> cms.ContentInfo:
 def test_a_time_with_an_offset_is_converted_to_utc():
     """`220309062954+0200` is 04:29:54 UTC. It was printed as the local time
     with " UTC" after it: two hours off, on the date that decides whether an
-    expired certificate is covered."""
+    expired certificate is covered.
+
+    Derived data: the fixture with its countersignature's signing_time replaced
+    by that UTCTime, every other field as recorded.
+    """
     from asn1crypto import core
 
     with_offset = core.UTCTime.load(b"\x17\x11" + b"220309062954+0200")
@@ -120,7 +124,11 @@ def test_a_time_with_an_offset_is_converted_to_utc():
 def test_a_time_with_no_zone_is_not_called_utc():
     """A GeneralizedTime without `Z` — BER, not DER — does not say which zone it
     is in, and asn1crypto gives back a naive datetime. Calling it UTC would be
-    making the zone up."""
+    making the zone up.
+
+    Derived data: the fixture with its countersignature's signing_time replaced
+    by that GeneralizedTime, every other field as recorded.
+    """
     from asn1crypto import core
 
     naive = core.GeneralizedTime.load(b"\x18\x0e" + b"20220309062954")

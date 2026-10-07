@@ -519,7 +519,7 @@ def _catalog(path: Path) -> Signature | None:
     try:
         completed = _ask_powershell(path)
         return _catalog_answer(completed.returncode, completed.stdout)
-    # ValueError is an answer that is not JSON, which `_catalog_answer` explains
+    # ValueError is an answer that is not JSON, which `_catalog_fields` explains
     # cannot happen; should it happen anyway, it is PowerShell not answering, as
     # much as a PowerShell that would not start, and the honest reply to both is
     # "I could not tell" rather than a traceback out of `analyze` or `verify`.
@@ -570,24 +570,27 @@ def _catalog_answer(returncode: int, stdout: str | None) -> Signature | None:
     if not stdout:
         return None
 
-    # Exit 0 is always one JSON object, so it is parsed without a fallback. The
-    # script prints one hashtable through ConvertTo-Json and nothing else, and
-    # under $ErrorActionPreference='Stop' every failure — no such file, a
-    # directory, access denied, a file in use — ends it with exit code 1 before
-    # that line, which is the test above. Measured with the real PowerShell on
-    # 2026-10-07 and held by test_catalog_encoding.py; the not-JSON and
-    # not-an-object branches that were here could not be reached.
-    answer = json.loads(stdout)
-    status, kind, signer, stamper = (
-        str(answer.get(key) or "").strip() for key in ("Status", "Type", "Signer", "Stamper")
-    )
-    if status != "Valid" or kind != "Catalog":
+    fields = _catalog_fields(stdout)
+    if fields["Status"] != "Valid" or fields["Type"] != "Catalog":
         return None
 
     return Signature(
         state=SignatureState.CATALOG,
         verified=True,
-        signer=signer or None,
-        timestamper=stamper or None,
+        signer=fields["Signer"] or None,
+        timestamper=fields["Stamper"] or None,
         detail="signed by catalog, not by an embedded blob",
     )
+
+
+def _catalog_fields(stdout: str) -> dict[str, str]:
+    """The four values of an answer the script gave with exit code 0, as text."""
+    # Exit 0 is always one JSON object, so it is parsed without a fallback. The
+    # script prints one hashtable through ConvertTo-Json and nothing else, and
+    # under $ErrorActionPreference='Stop' every failure — no such file, a
+    # directory, access denied, a file in use — ends it with exit code 1 before
+    # that line, which `_catalog_answer` has already turned away. Measured with
+    # the real PowerShell on 2026-10-07 and held by test_catalog_encoding.py; the
+    # not-JSON and not-an-object branches that were here could not be reached.
+    answer = json.loads(stdout)
+    return {key: str(answer.get(key) or "").strip() for key in ("Status", "Type", "Signer", "Stamper")}

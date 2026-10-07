@@ -306,18 +306,20 @@ def test_analyze_refuses_an_output_in_a_directory_that_is_not_there(sample, tmp_
     assert outcome.exit_code != 0
 
 
-def test_analyze_a_write_that_fails_after_the_scan_is_not_a_traceback(sample, tmp_path, monkeypatch):
-    """The directory is there and the write still fails — permissions, a full
-    disk: checking up front is not enough, the write has to be handled too."""
-    def denied(self, *args, **kwargs):
-        raise PermissionError(13, "Permission denied", str(self))
+def test_analyze_a_write_that_fails_after_the_scan_is_not_a_traceback(sample, tmp_path):
+    """The directory is there and the write still fails — here because a
+    directory already has the report's name, as permissions or a full disk
+    would make it fail: checking up front is not enough, the write has to be
+    handled too."""
+    output = tmp_path / "r.json"
+    output.mkdir()
 
-    monkeypatch.setattr(Path, "write_text", denied)
-    outcome = runner.invoke(app, ["analyze", str(sample), "--output", str(tmp_path / "r.json")])
+    outcome = runner.invoke(app, ["analyze", str(sample), "--output", str(output)])
 
     assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
     assert outcome.exit_code == 2
-    assert "Permission denied" in outcome.output
+    assert f"cannot write {output}" in outcome.output
+    assert output.is_dir()
 
 
 def test_analyze_a_citation_that_fails_costs_only_the_citation(tampered):
@@ -358,62 +360,38 @@ def tampered(sample, tmp_path) -> Path:
 
 
 @pytest.fixture
-def law_calls(monkeypatch, tmp_path) -> dict[str, list]:
-    """Every `offline` law_checker.check was given, and every request that tried
-    to leave the machine — recorded rather than raised, because analyze turns a
-    failed citation into a warning and an exception would be swallowed."""
-    import httpx
-
-    from exeradar import law_checker, law_fetcher
-
-    calls: dict[str, list] = {"offline": [], "network": []}
-    real_check = law_checker.check
-
-    def spy(subject, **kwargs):
-        calls["offline"].append(kwargs.get("offline"))
-        return real_check(subject, **kwargs)
-
-    def no_network(client, request, *args, **kwargs):
-        calls["network"].append(str(request.url))
-        raise httpx.ConnectError("no network in this test", request=request)
-
-    monkeypatch.setattr(law_checker, "check", spy)
-    monkeypatch.setattr(httpx.Client, "send", no_network)
-    monkeypatch.setattr(law_fetcher, "fetch_provisions",
-                        _recording(calls["network"], law_fetcher.fetch_provisions))
-    monkeypatch.setenv("EXERADAR_HOME", str(tmp_path / "home"))
-    return calls
+def law_home(monkeypatch, tmp_path) -> Path:
+    """An empty cache of legal texts: the first run of every installation."""
+    home = tmp_path / "home"
+    monkeypatch.setenv("EXERADAR_HOME", str(home))
+    return home
 
 
-def _recording(log: list, function):
-    def wrapper(act, *args, **kwargs):
-        log.append(act.name)
-        return function(act, *args, **kwargs)
-    return wrapper
+# Whether a request leaves the machine is asked of the network itself: the
+# `network` fixture is a real listener named as the proxy, and it records every
+# connection made through it. Nothing in the tool is replaced to find out.
 
 
-def test_analyze_downloads_nothing_by_default(tampered, law_calls):
+def test_analyze_downloads_nothing_by_default(tampered, network, law_home):
+    """The provisions are cited all the same, from the cache."""
     outcome = runner.invoke(app, ["analyze", str(tampered)])
 
     assert outcome.exit_code == 0, outcome.output
-    assert law_calls["offline"] == [True]
-    assert law_calls["network"] == []
+    assert network == []
     assert "signature_invalid" in outcome.output
+    assert "Provisions applied" in outcome.output
 
 
-def test_analyze_downloads_the_texts_only_with_online(tampered, law_calls, monkeypatch):
-    from exeradar import law_fetcher
-
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", _recording(law_calls["network"], lambda *a, **k: {}))
-
+def test_analyze_downloads_the_texts_only_with_online(tampered, network, law_home):
+    """--online asks the publishers for the acts. The network it meets here is
+    not there, and the run still ends with the analysis it has done."""
     outcome = runner.invoke(app, ["analyze", str(tampered), "--online"])
 
     assert outcome.exit_code == 0, outcome.output
-    assert law_calls["offline"] == [False]
-    assert law_calls["network"], "--online downloaded nothing"
+    assert any("europa.eu" in line for line in network), f"--online asked nobody: {network}"
 
 
-def test_analyze_says_how_to_get_a_text_the_cache_does_not_have(tampered, law_calls):
+def test_analyze_says_how_to_get_a_text_the_cache_does_not_have(tampered, network, law_home):
     """Offline over an empty cache the provisions are cited without a hash; the
     run has to say that, and how to fill the cache, rather than fail."""
     outcome = runner.invoke(app, ["analyze", str(tampered)])
@@ -423,10 +401,11 @@ def test_analyze_says_how_to_get_a_text_the_cache_does_not_have(tampered, law_ca
     assert "Traceback" not in outcome.output
     assert "--online" in outcome.output
     assert "Provisions applied" in outcome.output
+    assert network == []
 
 
 def test_analyze_cites_the_provisions_in_the_report_without_downloading_anything(
-    tampered, law_calls, tmp_path,
+    tampered, network, law_home, tmp_path,
 ):
     """End to end, on every platform: `signature_invalid` (high) cites the CRA,
     and the Markdown report carries the citations and the note that qualifies
@@ -438,7 +417,7 @@ def test_analyze_cites_the_provisions_in_the_report_without_downloading_anything
     outcome = runner.invoke(app, ["analyze", str(tampered), "--output", str(output)])
 
     assert outcome.exit_code == 0, outcome.output
-    assert law_calls["network"] == []
+    assert network == []
     text = output.read_text(encoding="utf-8")
     assert "signature_invalid" in text
     assert "## Provisions applied" in text
@@ -446,12 +425,14 @@ def test_analyze_cites_the_provisions_in_the_report_without_downloading_anything
     assert law_checker.CRA_APPLICATION_NOTE in text
 
 
-def test_analyze_has_no_offline_option_any_more(tampered, law_calls):
-    """Offline is the default, so the old flag would be a no-op: refused, not ignored."""
+def test_analyze_has_no_offline_option_any_more(tampered, network, law_home):
+    """Offline is the default, so the old flag would be a no-op: refused, not
+    ignored, and refused before anything is analysed or cited."""
     outcome = runner.invoke(app, ["analyze", str(tampered), "--offline"])
 
     assert outcome.exit_code == 2
-    assert law_calls["offline"] == []
+    assert "Provisions applied" not in outcome.output
+    assert network == []
 
 
 # --------------------------------------------------------------------------
