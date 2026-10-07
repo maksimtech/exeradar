@@ -202,9 +202,26 @@ def resolve(
     """
     candidates = search(organisation, client=client, timeout=timeout)
     wanted = organisation.strip().casefold()
-    for team in candidates:
-        if wanted in {team.host.casefold(), team.full_name.casefold(), team.name.casefold()}:
-            return Resolution(team=team, candidates=[], reason=f"exact match on {team.host or team.name}")
+    exact = [
+        team for team in candidates
+        if wanted in {team.host.casefold(), team.full_name.casefold(), team.name.casefold()}
+    ]
+    if len(exact) == 1:
+        team = exact[0]
+        return Resolution(team=team, candidates=[], reason=f"exact match on {team.host or team.name}")
+    # Two exact matches are still two answers. One organisation can have more
+    # than one member team — a product PSIRT and a corporate CERT, with different
+    # addresses and keys — and the first in the response was the one returned.
+    if exact:
+        names = ", ".join(f"{team.full_name or team.name} <{team.email}>" for team in exact)
+        return Resolution(
+            team=None,
+            candidates=exact,
+            reason=(
+                f"{len(exact)} member teams match {organisation!r} exactly: {names}. "
+                "Choose by name rather than letting the order choose."
+            ),
+        )
 
     if not candidates:
         return Resolution(

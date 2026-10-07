@@ -24,6 +24,7 @@ from exeradar.models import (
     ExeResult,
     Finding,
     Import,
+    Library,
     Section,
     Signature,
     SignatureState,
@@ -195,6 +196,111 @@ def test_markdown_says_so_when_there_is_nothing_to_say():
     assert "none" in text.lower() or "no " in text.lower()
 
 
+def _parsed(text: str) -> list:
+    """The Markdown as markdown-it reads it (CommonMark, through Rich), inline
+    tokens included."""
+    from rich.markdown import Markdown
+
+    return [child for token in Markdown(text).parsed for child in [token, *(token.children or [])]]
+
+
+def _raw_html(text: str) -> list[str]:
+    return [token.content for token in _parsed(text) if token.type in ("html_inline", "html_block")]
+
+
+def test_markdown_carries_no_html_from_the_strings_of_the_binary(pe_with_a_string):
+    """A path out of the binary with a backtick in it closed its code span, and
+    the rest reached the ticket it was pasted into as raw HTML."""
+    from exeradar.scanner import scan
+
+    payload = rb"C:\y\`<img src=x onerror=alert(1)>`"
+    result = scan(pe_with_a_string(payload))
+
+    assert payload.decode() in result.strings.paths   # the premise: it was extracted
+    assert _raw_html(report.to_markdown(result)) == []
+
+
+def test_markdown_neutralises_markup_in_every_field_that_comes_from_the_binary():
+    """Not only the strings: the signer, the DLL names, a library's evidence,
+    the file name and the section names come out of the file too. None of them
+    may produce HTML or a link, and a section named `a|b` must not add a column."""
+    result = ExeResult(
+        path="[x](http___evil.example).exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        signature=Signature(state=SignatureState.EMBEDDED, verified=True, signer="s",
+                            chain=[Certificate(subject="CN=`<b>x</b>`", issuer="CN=i")]),
+        imports=[Import(dll="k`<i>32</i>`.dll", functions=["f"])],
+        libraries=[Library("zlib", "1.3.1", "build path", "C:\\b\\<img src=x>\\zlib-1.3.1")],
+        sections=[Section("a|b", 1, 1, 1.0)],
+    )
+
+    text = report.to_markdown(result)
+
+    assert _raw_html(text) == []
+    assert [t for t in _parsed(text) if t.type in ("link_open", "image")] == []
+    header = next(line for line in text.splitlines() if line.startswith("| Name"))
+    row = next(line for line in text.splitlines() if "a" in line and line.startswith("| ") and "1.00" in line)
+    assert row.replace("\\|", "").count("|") == header.count("|"), row
+
+
+def _with_an_address_finding() -> ExeResult:
+    from exeradar import signature
+
+    return ExeResult(
+        path="x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        signature=Signature(state=SignatureState.UNKNOWN, detail=signature.NOT_VERIFIABLE_HERE),
+        strings=Strings(ips=["8.8.8.8"]),
+        findings=[Finding(id="hardcoded_ip", severity="low", evidence="8.8.8.8")],
+    )
+
+
+def _shows_the_finding(text: str) -> bool:
+    from exeradar.law_checker import FINDING_TITLES
+
+    return "hardcoded_ip" in text or FINDING_TITLES["hardcoded_ip"] in text
+
+
+def test_markdown_shows_the_findings():
+    """ARCHITECTURE.md section 7 separates facts from findings, and the report
+    carried only the facts: a finding the scan raised reached the JSON and
+    nobody reading the Markdown."""
+    assert _shows_the_finding(report.to_markdown(_with_an_address_finding()))
+
+
+def _unsigned() -> ExeResult:
+    return ExeResult(
+        path="x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        signature=Signature(state=SignatureState.UNSIGNED, verified=False,
+                            detail="no embedded signature and no catalog entry"),
+        findings=[Finding(id="unsigned", severity="medium", evidence="no signature")],
+    )
+
+
+def _cited_offline(result: ExeResult, tmp_path):
+    """What analyze hands the renderer, computed from an empty cache: no
+    network, and citations without a hash rather than with an invented one."""
+    from exeradar import law_checker
+    from exeradar.law_cache import LawCache
+
+    return law_checker.check(result, offline=True, cache=LawCache(tmp_path / "law_cache.json"))
+
+
+def test_markdown_carries_the_provisions_and_the_notes_that_qualify_them(tmp_path):
+    """The "Provisions applied" section README and ARCHITECTURE.md section 5
+    describe, with the CRA note law_checker promises on "every report that cites
+    it". Nothing called law_checker, so no report had either. The renderer is
+    handed the result of the check, as `law` in section 5, and decides nothing."""
+    from exeradar import law_checker
+
+    result = _unsigned()
+
+    text = report.to_markdown(result, law=_cited_offline(result, tmp_path))
+
+    assert "## Provisions applied" in text
+    assert law_checker.CRA_APPLICATION_NOTE in text
+    assert f"Provision applied: {law_checker.CRA.name} Allegato I, Parte I(2)(f)" in text
+    assert "SHA256: not available" in text
+
+
 # --------------------------------------------------------------------------
 # console
 # --------------------------------------------------------------------------
@@ -219,6 +325,69 @@ def test_console_reports_an_error_without_pretending_to_have_results():
 
     assert "unrecognised format" in text
     assert "sections" not in text.lower()
+
+
+def test_console_prints_a_section_name_that_looks_like_markup_as_it_is():
+    """Eight bytes chosen by whoever built the PE. `[/x]` was handed to Rich as
+    markup, and a closing tag with nothing open is a MarkupError: a hostile
+    binary ended `analyze` with a traceback."""
+    result = ExeResult(path="x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+                       sections=[Section("[/x]", 1, 1, 1.0)])
+    console = Console(record=True, width=200)
+
+    report.to_console(result, console=console)
+
+    assert "[/x]" in console.export_text()
+
+
+def test_console_does_not_obey_valid_tags_in_the_data_of_the_binary():
+    """A well-formed tag does not crash, it is obeyed: whoever writes the binary
+    chooses the styles and the links. It is printed literally, in `analyze` and
+    in the `batch` table — file name and error included."""
+    result = ExeResult(
+        path="[bold]x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        signature=Signature(state=SignatureState.EMBEDDED, verified=True,
+                            signer="[bold red]Microsoft Corporation[/bold red]"),
+        imports=[Import(dll="[link=http://evil.example]k32.dll", functions=["f"])],
+        strings=Strings(paths=["C:\\[i]x[/i]"]),
+    )
+    broken = ExeResult(path="[u]y.exe", size=1, sha256="cd", error="not a PE file: [u]y.exe")
+    console = Console(record=True, width=200)
+
+    report.to_console(result, console=console)
+    report.to_console(broken, console=console)
+    report.to_console_many([result, broken], console)
+    text = console.export_text()
+
+    assert "[bold red]Microsoft Corporation[/bold red]" in text
+    assert "[link=http://evil.example]k32.dll" in text
+    assert "C:\\[i]x[/i]" in text
+    assert "[bold]x.exe" in text
+    assert "not a PE file: [u]y.exe" in text
+
+
+def test_console_shows_the_findings():
+    console = Console(record=True, width=200)
+
+    report.to_console(_with_an_address_finding(), console=console)
+
+    assert _shows_the_finding(console.export_text())
+
+
+def test_console_ends_with_the_provisions_applied(tmp_path):
+    """ARCHITECTURE.md section 5: 'console through Rich with a "Provisions
+    applied" section at the end'."""
+    from exeradar import law_checker
+
+    result = _unsigned()
+    console = Console(record=True, width=200)
+
+    report.to_console(result, console=console, law=_cited_offline(result, tmp_path))
+    text = " ".join(console.export_text().split())
+
+    assert "Provisions applied" in text
+    assert f"Provision applied: {law_checker.CRA.name} art. 13(1)" in text
+    assert law_checker.CRA_APPLICATION_NOTE in text
 
 
 # --------------------------------------------------------------------------
@@ -340,3 +509,4 @@ def test_write_many_markdown(results, tmp_path):
 def test_write_many_refuses_an_unknown_extension(results, tmp_path):
     with pytest.raises(ValueError):
         report.write_many(results, tmp_path / "out.doc")
+

@@ -453,6 +453,24 @@ def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypat
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]
 
 
+def test_offline_cites_from_the_cache_the_hashes_an_online_run_stored(cache, monkeypatch):
+    """The module cites the cached copy when there is no network, and offline by
+    choice is the same: nothing downloaded, the hashes and dates read from the cache."""
+    unsigned = result(state=SignatureState.UNSIGNED, verified=False)
+    monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
+    online_run = check(unsigned, cache=cache, now=NOW)
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("offline must not download")
+
+    monkeypatch.setattr(law_fetcher, "fetch_provisions", no_network)
+    offline_run = check(unsigned, cache=cache, now=NOW, offline=True)
+
+    assert all(citation.sha256 for citation in online_run.citations)
+    assert [c.sha256 for c in offline_run.citations] == [c.sha256 for c in online_run.citations]
+    assert {status.source for status in offline_run.acts} == {"cache"}
+
+
 # --------------------------------------------------------------------------
 # rendering a citation
 # --------------------------------------------------------------------------

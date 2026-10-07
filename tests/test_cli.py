@@ -12,12 +12,18 @@ Windows the catalog cannot be consulted, so a file with no embedded signature
 may be perfectly signed and this tool cannot tell. Returning 1 there would fail
 a pipeline over a missing capability, and returning 0 would pass a file nobody
 checked; 2 is the honest answer, and `|| exit` still catches it.
+
+`analyze` is here for what only the command line decides: where the report
+goes, what happens when it cannot be written, and whether the network is
+reached at all.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -139,6 +145,179 @@ def test_batch_writes_nothing_when_it_found_nothing(tmp_path):
 
     assert outcome.exit_code == 0
     assert not target.exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions are NTFS")
+def test_batch_does_not_list_a_file_twice_through_a_junction(sample, tmp_path):
+    """Path.rglob skips symlinks and follows junctions: one pointing back at its
+    parent listed the same PE once per level, until the path grew too long."""
+    root = tmp_path / "tree"
+    root.mkdir()
+    shutil.copy(sample, root / "one.exe")
+    junction = root / "loop"
+    made = subprocess.run(["cmd", "/c", "mklink", "/J", str(junction), str(root)],
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if made.returncode != 0:
+        pytest.skip(f"mklink /J is not available: {made.stdout}{made.stderr}")
+    out = tmp_path / "run.json"
+    try:
+        outcome = runner.invoke(app, ["batch", str(root), "--output", str(out)])
+        rows = json.loads(out.read_text(encoding="utf-8"))
+    finally:
+        os.rmdir(junction)   # removes the link only, not what it points at
+
+    assert outcome.exit_code == 0
+    assert len(rows) == 1, f"{len(rows)} rows for one file"
+
+
+def test_batch_does_not_enter_a_directory_twice_through_a_symlink(sample, tmp_path):
+    """The same guarantee for a directory symlink, which Linux can check too.
+
+    rglob already skipped symlinks; this guards the walk rewritten for junctions.
+    """
+    root = tmp_path / "tree"
+    root.mkdir()
+    shutil.copy(sample, root / "one.exe")
+    try:
+        os.symlink(root, root / "loop", target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlinks are not available: {error}")
+    out = tmp_path / "run.json"
+
+    outcome = runner.invoke(app, ["batch", str(root), "--output", str(out)])
+
+    assert outcome.exit_code == 0, outcome.output
+    assert len(json.loads(out.read_text(encoding="utf-8"))) == 1
+
+
+# --------------------------------------------------------------------------
+# analyze
+# --------------------------------------------------------------------------
+
+
+def test_analyze_does_not_crash_on_a_url_with_square_brackets(pe_with_a_string):
+    """`http://evil.example/[/x]` in a binary is a fact to print, not Rich
+    markup: it raised MarkupError and ended `analyze` with a traceback."""
+    target = pe_with_a_string(b"http://evil.example/[/x]")
+
+    outcome = runner.invoke(app, ["analyze", str(target)])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 0
+    assert "http://evil.example/[/x]" in outcome.output
+
+
+# --------------------------------------------------------------------------
+# analyze: the provisions are cited offline unless --online is asked for
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def tampered(sample, tmp_path) -> Path:
+    """The sample with one byte of .text changed: the signature no longer matches
+    on any platform, so `signature_invalid` is raised and the CRA is cited."""
+    data = bytearray(sample.read_bytes())
+    data[0x500] ^= 0xFF
+    target = tmp_path / "tampered.exe"
+    target.write_bytes(bytes(data))
+    return target
+
+
+@pytest.fixture
+def law_calls(monkeypatch, tmp_path) -> dict[str, list]:
+    """Every `offline` law_checker.check was given, and every request that tried
+    to leave the machine — recorded rather than raised, because analyze turns a
+    failed citation into a warning and an exception would be swallowed."""
+    import httpx
+
+    from exeradar import law_checker, law_fetcher
+
+    calls: dict[str, list] = {"offline": [], "network": []}
+    real_check = law_checker.check
+
+    def spy(subject, **kwargs):
+        calls["offline"].append(kwargs.get("offline"))
+        return real_check(subject, **kwargs)
+
+    def no_network(client, request, *args, **kwargs):
+        calls["network"].append(str(request.url))
+        raise httpx.ConnectError("no network in this test", request=request)
+
+    monkeypatch.setattr(law_checker, "check", spy)
+    monkeypatch.setattr(httpx.Client, "send", no_network)
+    monkeypatch.setattr(law_fetcher, "fetch_provisions",
+                        _recording(calls["network"], law_fetcher.fetch_provisions))
+    monkeypatch.setenv("EXERADAR_HOME", str(tmp_path / "home"))
+    return calls
+
+
+def _recording(log: list, function):
+    def wrapper(act, *args, **kwargs):
+        log.append(act.name)
+        return function(act, *args, **kwargs)
+    return wrapper
+
+
+def test_analyze_downloads_nothing_by_default(tampered, law_calls):
+    outcome = runner.invoke(app, ["analyze", str(tampered)])
+
+    assert outcome.exit_code == 0, outcome.output
+    assert law_calls["offline"] == [True]
+    assert law_calls["network"] == []
+    assert "signature_invalid" in outcome.output
+
+
+def test_analyze_downloads_the_texts_only_with_online(tampered, law_calls, monkeypatch):
+    from exeradar import law_fetcher
+
+    monkeypatch.setattr(law_fetcher, "fetch_provisions", _recording(law_calls["network"], lambda *a, **k: {}))
+
+    outcome = runner.invoke(app, ["analyze", str(tampered), "--online"])
+
+    assert outcome.exit_code == 0, outcome.output
+    assert law_calls["offline"] == [False]
+    assert law_calls["network"], "--online downloaded nothing"
+
+
+def test_analyze_says_how_to_get_a_text_the_cache_does_not_have(tampered, law_calls):
+    """Offline over an empty cache the provisions are cited without a hash; the
+    run has to say that, and how to fill the cache, rather than fail."""
+    outcome = runner.invoke(app, ["analyze", str(tampered)])
+
+    assert outcome.exit_code == 0, outcome.output
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert "Traceback" not in outcome.output
+    assert "--online" in outcome.output
+    assert "Provisions applied" in outcome.output
+
+
+def test_analyze_cites_the_provisions_in_the_report_without_downloading_anything(
+    tampered, law_calls, tmp_path,
+):
+    """End to end, on every platform: `signature_invalid` (high) cites the CRA,
+    and the Markdown report carries the citations and the note that qualifies
+    them, all from the local cache."""
+    from exeradar import law_checker
+
+    output = tmp_path / "report.md"
+
+    outcome = runner.invoke(app, ["analyze", str(tampered), "--output", str(output)])
+
+    assert outcome.exit_code == 0, outcome.output
+    assert law_calls["network"] == []
+    text = output.read_text(encoding="utf-8")
+    assert "signature_invalid" in text
+    assert "## Provisions applied" in text
+    assert f"Provision applied: {law_checker.CRA.name} Allegato I, Parte I(2)(f)" in text
+    assert law_checker.CRA_APPLICATION_NOTE in text
+
+
+def test_analyze_has_no_offline_option_any_more(tampered, law_calls):
+    """Offline is the default, so the old flag would be a no-op: refused, not ignored."""
+    outcome = runner.invoke(app, ["analyze", str(tampered), "--offline"])
+
+    assert outcome.exit_code == 2
+    assert law_calls["offline"] == []
 
 
 # --------------------------------------------------------------------------

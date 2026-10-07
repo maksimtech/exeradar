@@ -23,6 +23,27 @@ no version in this file has ever matched — 40 is not a month, and
   variable and is never part of the script, so there is no escaping left to get wrong.
   Checked against PowerShell's own parser, without running anything.
 
+- **Strings out of the binary are printed, not obeyed.** The console report passed
+  them to Rich as markup: `http://evil.example/[/x]` in a PE ended `analyze` with a
+  `MarkupError`, and a well-formed tag such as `[link=…]` was followed. Every value that
+  comes out of the file — its name, strings, section and DLL names, the signer, errors —
+  is escaped, in `analyze` and in the `batch` table.
+
+- **The Markdown report cannot carry HTML from the binary.** A path such as
+  ``C:\y\`<img src=x onerror=alert(1)>` `` closed its code span and reached the ticket it
+  was pasted into as raw HTML; a section named `a|b` added a column to the table. Code
+  spans now use a fence longer than any run of backticks inside them, pipes are escaped
+  in table cells, and free text — the file name, the signature sentence, library
+  evidence, notes — has `& < > [ ]` written as entities, which cannot turn back into
+  markup whatever precedes them.
+
+- **A forged certificate table no longer hides the file's strings.** The range the
+  header declares for the certificate table was left out of string extraction even when
+  LIEF found no signature in it and even when it covered the sections: pointed at
+  0x400..EOF, it removed every URL, address and path from the report, and the
+  `hardcoded_ip` finding with them. It is skipped now only when a signature was read
+  there, and only past the last section.
+
 ### Fixed
 
 - **A file whose path is not ASCII is analysed on Windows.** LIEF opens a path through
@@ -33,6 +54,15 @@ no version in this file has ever matched — 40 is not a month, and
 - **A catalog signer whose Subject contains `|` keeps its name.** PowerShell's answer was
   four fields joined by `|`, so `O=Contoso|Fabrikam` lost half of itself to the
   timestamper. The script now answers in JSON.
+
+- **`batch` does not follow NTFS junctions.** `Path.rglob` skips symlinks and follows
+  junctions, and one pointing back at its parent — `mklink /J`, no privilege needed —
+  listed the same PE 64 times.
+
+- **`first_teams.resolve` does not choose between two exact matches.** An organisation
+  can have more than one member team — a product PSIRT and a corporate CERT, with
+  different addresses and keys — and the first in the response was returned. Both are
+  now candidates, and `psirt` exits 2.
 
 - **Five tests no longer assert the author's installed DLL versions** (OpenSSL 3.5.8,
   curl 8.13.0, pcre2 10.48): they failed on any machine that had updated Git for
@@ -73,6 +103,23 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Added
 
+- **Findings in the `analyze` report.** ARCHITECTURE.md section 7 separates facts from
+  findings, and the console and Markdown reports showed only the facts: a
+  `signature_invalid` of severity high reached the JSON and the count in `batch` and
+  nobody reading `analyze`. Both now end with the findings, title and severity first.
+
+- **"Provisions applied", as README and ARCHITECTURE.md section 5 describe.**
+  `law_checker.check` was called by nothing, so no report carried a citation or the notes
+  that qualify them (the CRA applies from 11 December 2027; it binds a manufacturer).
+  `analyze` now cites, in the console and in Markdown. The JSON is unchanged: it
+  carries the findings, not the citations.
+
+- **`analyze --online`, and offline by default.** `analyze` cites from the local cache
+  in `~/.exeradar` and downloads nothing; `--online` downloads the texts the findings
+  need and refreshes the cache. A provision the cache does not hold is cited without a
+  hash, and the run says so and suggests `--online`, instead of failing. A clean file
+  touches no network either way.
+
 - **The files the build is told to include are checked to be there.** apkradar lost its
   `LICENSE` out of the working tree on 2026-10-04 and the loss reached `main`: pyproject
   names the file, so `python -m build` failed with `License file does not exist: LICENSE`,
@@ -111,6 +158,11 @@ no version in this file has ever matched — 40 is not a month, and
   the version check disabled, a dirty tree allowed, an existing tag no longer
   stopping anything, and the push no longer atomic. All five fail.
 
+### Changed
+
+- **`law_checker.check` takes `offline` instead of `**context`.** The extra keywords were
+  passed to `findings_of` and `notes_of`, which accept none, so any of them ended in a
+  `TypeError` from inside the check.
 
 ## [2026.41] - 2026-10-03
 

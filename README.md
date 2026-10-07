@@ -44,7 +44,7 @@ either.
 ## Use
 
 ```
-exeradar analyze FILE [--output report.json|report.md]
+exeradar analyze FILE [--output report.json|report.md] [--online]
 exeradar batch DIR   [--output report.json|report.md]
 exeradar verify FILE
 ```
@@ -89,6 +89,8 @@ Strings 1 urls, 0 ips, 0 hosts, 1 paths
  .pdata   348      512     3.77    
  .rsrc    80,928   81,408  6.17    
  .reloc   48       512     3.90    
+
+Findings none raised
 ```
 
 Four things in that output are the tool refusing to overclaim.
@@ -189,6 +191,25 @@ Act, NIS2, GDPR — and cites each with the SHA-256 of the exact wording applied
 Nothing is cited that the acts do not contain: a test reads them and fails on
 any reference they lack. See ARCHITECTURE.md section 4 for what is deliberately
 *not* cited, and why.
+
+`analyze` ends with the findings and, when there are any, a "Provisions applied"
+section: each provision with its SHA-256 and the date of its wording, then the
+notes that qualify it — the CRA applies from 11 December 2027, and binds a
+manufacturer, which one file cannot establish. Nothing is downloaded unless you
+ask: by default `analyze` cites from the local cache in `~/.exeradar`
+(`$EXERADAR_HOME`), and a provision that is not cached is cited without a hash
+rather than with a guess, with a line saying so. `--online` downloads the texts
+the findings need, compares them with the cache and stores them, so the next
+offline run cites them with their hash:
+
+```
+$ exeradar analyze tampered.exe --online   # once, to fill the cache
+$ exeradar analyze tampered.exe            # from then on, from the cache
+```
+
+A clean file cites nothing and touches no network either way. The Markdown
+report carries the same section; the JSON carries the findings, not the
+citations.
 
 ## Part of the Radar family
 

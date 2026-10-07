@@ -204,6 +204,21 @@ def test_resolve_refuses_to_guess_when_nothing_matches_exactly():
     assert "exact" in resolution.reason.lower()
 
 
+def test_resolve_does_not_choose_between_two_exact_matches():
+    """The module never chooses between two organisations, nor between two teams
+    of one: an organisation can have a product PSIRT and a corporate CERT, with
+    different addresses and keys, and the first in the response was returned."""
+    acme_psirt = {"id": "acme-psirt", "team": "ACME-PSIRT", "team-full": "ACME Product PSIRT",
+                  "host": "ACME Corp", "email": "psirt@acme.example"}
+    acme_cert = {"id": "acme-cert", "team": "ACME-CERT", "team-full": "ACME Corporate CERT",
+                 "host": "ACME Corp", "email": "cert@acme.example"}
+
+    resolution = first_teams.resolve("ACME Corp", client=answering(acme_psirt, acme_cert))
+
+    assert resolution.team is None
+    assert len(resolution.candidates) == 2
+
+
 def test_resolve_matches_the_full_team_name_too_and_is_case_insensitive():
     client = answering(HP_INC)
 

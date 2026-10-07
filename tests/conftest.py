@@ -22,6 +22,7 @@ exactly why `SignatureState.UNKNOWN` exists.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,53 @@ def unsigned_pe_path(signed_pe_path, tmp_path) -> Path:
     target = tmp_path / "unsigned.exe"
     target.write_bytes(bytes(data))
     return target
+
+
+@pytest.fixture
+def forged_certificate_table_pe_path(signed_pe_path, tmp_path) -> Path:
+    """A signed PE whose certificate table entry claims 0x400 to the end of the file.
+
+    The entry is a header field, so whoever wrote the file chooses it. Pointed
+    over every section, LIEF finds no signature there — and the range used to be
+    left out of string extraction all the same.
+    """
+    import struct
+
+    data = bytearray(signed_pe_path.read_bytes())
+    struct.pack_into("<II", data, _security_directory_offset(data), 0x400, len(data) - 0x400)
+
+    target = tmp_path / "hidden.exe"
+    target.write_bytes(bytes(data))
+    return target
+
+
+# python.exe's .reloc starts at 0x16600 with 512 raw bytes and 48 virtual ones,
+# so from 256 bytes in it is zero padding: inside a section, so not overlay, and
+# before the certificate table at 0x16800. LIEF reads nothing there as a
+# structure; the strings pass does.
+_RELOC_PADDING = 0x16600 + 256
+
+
+@pytest.fixture
+def pe_with_a_string(tmp_path) -> Callable[[bytes], Path]:
+    """Make a copy of python.exe carrying `text` in its .reloc padding.
+
+    The way a hostile string reaches the reports: written by whoever built the
+    binary, extracted as a fact, and printed.
+    """
+    sample = FIXTURES / "python.exe"
+    if not sample.is_file():
+        pytest.skip("tests/fixtures/python.exe is missing")
+
+    def make(text: bytes) -> Path:
+        assert len(text) + 2 <= 200, "the padding holds 256 bytes"
+        data = bytearray(sample.read_bytes())
+        data[_RELOC_PADDING:_RELOC_PADDING + len(text) + 2] = b"\x00" + text + b"\x00"
+        target = tmp_path / "crafted.exe"
+        target.write_bytes(bytes(data))
+        return target
+
+    return make
 
 
 @pytest.fixture

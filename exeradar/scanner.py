@@ -12,7 +12,7 @@ import hashlib
 from pathlib import Path
 
 from exeradar import libraries, signature, strings
-from exeradar.models import ExeResult
+from exeradar.models import ExeResult, SignatureState
 
 _READ_CHUNK = 1 << 20
 
@@ -176,8 +176,16 @@ def scan(path: str | Path) -> ExeResult:
     # printable runs pulled from compressed bytes are not strings — they are
     # pairs of characters that happen to look like hostnames. One 457 MB
     # webpack produced 747 of them and not one was real.
-    excluded = list(signature.signed_regions(path))
+    #
+    # The certificate table is skipped only when a signature was read there, and
+    # only past the last section. Where it lies is a header field anyone can
+    # write: pointed at 0x400..EOF, over every section, LIEF found no signature
+    # in it and the report still lost every URL and path in the file — the
+    # endpoints a malware author most wants left out, and `hardcoded_ip` with them.
     start = pe.overlay_start(path)
+    excluded = []
+    if result.signature.state is SignatureState.EMBEDDED and start is not None:
+        excluded = [(max(begin, start), end) for begin, end in signature.signed_regions(path) if end > start]
     if start is not None:
         result.overlay = max(size - start, 0)
         if result.overlay:
