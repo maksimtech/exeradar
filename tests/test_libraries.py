@@ -24,6 +24,7 @@ about an OID, a protocol version or four bytes of debris.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -34,6 +35,29 @@ from exeradar.models import Import
 
 GIT_BIN = Path(r"C:\Program Files\Git\ucrt64\bin")
 SYSTEM_CURL = Path(r"C:\Windows\System32\curl.exe")
+
+# The cases below read DLLs installed on the machine, and those move: Git for
+# Windows and Windows Update replace them. They used to assert the versions
+# measured on 2026-10-02 — OpenSSL 3.5.8, curl 8.13.0, pcre2 10.48 — and so
+# failed on the first machine that had updated, about the machine and not the
+# code. The expected version is now read out of the same bytes by a pattern
+# written here, the library's own statement of itself; what is asserted is
+# unchanged: which library, that version, and nothing else.
+_STATED = {
+    "zlib": rb"(?:de|in)flate (\d+\.\d+\.\d+) Copyright",
+    "expat": rb"expat_(\d+\.\d+\.\d+)",
+    "openssl": rb"OpenSSL (\d+\.\d+\.\d+) \d{1,2} [A-Z][a-z]{2} \d{4}",
+    "libssh2": rb"libssh2-(\d+\.\d+\.\d+)/",
+    "nghttp2": rb"nghttp2-(\d+\.\d+\.\d+)/",
+    "curl": rb"curl/(\d+\.\d+\.\d+)",
+}
+
+
+def _stated(data: bytes, library: str) -> str:
+    """The version `library` states in `data`, by the pattern above; one, or the test is wrong."""
+    found = {match.decode() for match in re.findall(_STATED[library], data)}
+    assert len(found) == 1, f"{library}: {sorted(found)}"
+    return found.pop()
 
 
 def versions(*candidates: str) -> set[tuple[str, str | None]]:
@@ -398,17 +422,18 @@ def test_the_committed_fixture_claims_nothing(pe_path):
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the corpus is a Windows install")
 @pytest.mark.parametrize(
-    ("path", "expected"),
+    ("path", "library"),
     [
-        (GIT_BIN / "zlib1.dll", {("zlib", "1.3.2")}),
-        (GIT_BIN / "libexpat-1.dll", {("expat", "2.8.5")}),
-        (GIT_BIN / "libcrypto-3-x64.dll", {("openssl", "3.5.8")}),
-        (GIT_BIN / "libssh2-1.dll", {("libssh2", "1.11.1")}),
-        (GIT_BIN / "libnghttp2-14.dll", {("nghttp2", "1.70.0")}),
+        (GIT_BIN / "zlib1.dll", "zlib"),
+        (GIT_BIN / "libexpat-1.dll", "expat"),
+        (GIT_BIN / "libcrypto-3-x64.dll", "openssl"),
+        (GIT_BIN / "libssh2-1.dll", "libssh2"),
+        (GIT_BIN / "libnghttp2-14.dll", "nghttp2"),
     ],
 )
-def test_a_dll_that_is_one_known_library_reports_that_library(path, expected):
-    """Measured on 2026-10-02 against Git for Windows 2.52's ucrt64 tree.
+def test_a_dll_that_is_one_known_library_reports_that_library(path, library):
+    """Measured on 2026-10-02 against Git for Windows 2.52's ucrt64 tree, and
+    read since then against whichever version is installed: see _STATED.
 
     Exactly equal, not a superset: an extra row here would be a false positive,
     and these files are small enough that there is nothing to hide behind.
@@ -418,9 +443,9 @@ def test_a_dll_that_is_one_known_library_reports_that_library(path, expected):
     if not path.is_file():
         pytest.skip(f"{path.name} is not installed here")
 
-    found = {(lib.name, lib.version)
-             for lib in libraries.versions_in(strings.extract_raw(path.read_bytes()))}
-    assert found == expected
+    data = path.read_bytes()
+    found = {(lib.name, lib.version) for lib in libraries.versions_in(strings.extract_raw(data))}
+    assert found == {(library, _stated(data, library))}
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the corpus is a Windows install")
@@ -438,11 +463,13 @@ def test_the_librarys_own_word_outranks_the_path_it_was_compiled_in():
     if not path.is_file():
         pytest.skip("libcrypto-3-x64.dll is not installed here")
 
-    found = libraries.versions_in(strings.extract_raw(path.read_bytes()))
+    data = path.read_bytes()
+    found = libraries.versions_in(strings.extract_raw(data))
 
     assert len(found) == 1
     assert found[0].source == "banner"
-    assert found[0].evidence == "OpenSSL 3.5.8 25 Aug 2026"
+    assert re.fullmatch(_STATED["openssl"].decode(), found[0].evidence), found[0].evidence
+    assert found[0].version == _stated(data, "openssl")
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the corpus is a Windows install")
@@ -458,7 +485,8 @@ def test_a_dll_that_carries_its_version_unattributed_still_reports_nothing():
         pytest.skip("libpcre2-8-0.dll is not installed here")
 
     data = path.read_bytes()
-    assert b"10.48" in data                                  # it is in there
+    # It is in there: 10.48 when this was written, whichever 10.x is installed now.
+    assert re.search(rb"\b10\.\d+ \d{4}-\d{2}-\d{2}\b", data)
     assert libraries.versions_in(strings.extract_raw(data)) == []
 
 
@@ -471,8 +499,8 @@ def test_the_system_curl_reports_its_own_version_and_its_bundled_zlib():
     if not SYSTEM_CURL.is_file():
         pytest.skip("no curl.exe in System32")
 
-    found = {lib.name: lib.version
-             for lib in libraries.versions_in(strings.extract_raw(SYSTEM_CURL.read_bytes()))}
+    data = SYSTEM_CURL.read_bytes()
+    found = {lib.name: lib.version for lib in libraries.versions_in(strings.extract_raw(data))}
 
-    assert found.get("curl") == "8.13.0"
-    assert found.get("zlib") == "1.3.1"
+    assert found.get("curl") == _stated(data, "curl")
+    assert found.get("zlib") == _stated(data, "zlib")

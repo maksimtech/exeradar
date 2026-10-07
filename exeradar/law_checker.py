@@ -3,8 +3,9 @@ ExeRadar — EU law provisions for the findings of a static analysis.
 
 Maps what the analysis found to the provisions it concerns, and cites each one
 with the SHA-256 of the exact text applied and the date of that wording. The
-text is downloaded on every run and compared with the local cache; without
-network the cached copy is cited.
+text is downloaded and compared with the local cache unless `offline` is asked
+for; offline, or without network, the cached copy is cited. `exeradar analyze`
+asks for offline unless it is given `--online`.
 
 Shared by the Radar tools: only the mapping section is specific to ExeRadar,
 and it is the part that needed thinking about. The other four Radars examine
@@ -339,12 +340,20 @@ def check(
     *,
     cache: LawCache | None = None,
     now: datetime | None = None,
-    **context,
+    offline: bool = False,
 ) -> LawCheckResult:
-    """Cite the provisions that apply to the findings about `subject`."""
+    """Cite the provisions that apply to the findings about `subject`.
+
+    `offline` cites from the local cache without downloading anything, and an
+    act that is not cached is cited without a hash rather than with a guess.
+
+    It used to take `**context` and hand it to `findings_of` and `notes_of`,
+    neither of which accepts anything more, so any extra argument ended in a
+    TypeError from inside the check instead of at the call.
+    """
     now = now or datetime.now(UTC)
-    evidence = findings_of(subject, now=now, **context)
-    notes = notes_of(subject, now=now, **context)
+    evidence = findings_of(subject, now=now)
+    notes = notes_of(subject, now=now)
     cited = [
         (finding, act, ref)
         for finding in evidence
@@ -365,6 +374,9 @@ def check(
         articles = tuple(dict.fromkeys(
             [ref.split("(")[0] for _, a, ref in cited if a == act] + list(ALSO_FETCH.get(act, ()))
         ))
+        if offline:
+            errors[act] = "offline: the text was not downloaded"
+            continue
         try:
             by_article = law_fetcher.fetch_provisions(act, articles, now=now)
         except LawFetchError as e:

@@ -23,7 +23,9 @@ backlog, on the input side.
 
 from __future__ import annotations
 
+import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -42,6 +44,12 @@ class _Completed:
         self.returncode = returncode
 
 
+def _answer(status, kind, signer="", stamper=""):
+    """What the script prints: one JSON object, the way ConvertTo-Json writes it."""
+    return json.dumps({"Status": status, "Type": kind, "Signer": signer, "Stamper": stamper},
+                      ensure_ascii=False)
+
+
 @pytest.fixture
 def powershell(monkeypatch):
     """Stand in for PowerShell, and record how it was called."""
@@ -51,7 +59,7 @@ def powershell(monkeypatch):
         calls.append({"argv": argv, "kwargs": kwargs})
         return fake_run.result
 
-    fake_run.result = _Completed("Valid|Catalog|CN=Test, O=Test|")
+    fake_run.result = _Completed(_answer("Valid", "Catalog", "CN=Test, O=Test"))
     monkeypatch.setattr(subprocess, "run", fake_run)
     return fake_run, calls
 
@@ -116,7 +124,7 @@ def test_powershell_is_told_to_write_utf8(powershell):
 def test_a_non_cp1252_signer_survives_the_round_trip(powershell, subject):
     """The name the CA chose is the name the report must print."""
     fake_run, _ = powershell
-    fake_run.result = _Completed(f"Valid|Catalog|{subject}|")
+    fake_run.result = _Completed(_answer("Valid", "Catalog", subject))
 
     result = signature._catalog(Path("whatever.exe"))
 
@@ -124,12 +132,31 @@ def test_a_non_cp1252_signer_survives_the_round_trip(powershell, subject):
     assert result.signer == subject
 
 
+def test_a_pipe_in_the_subject_does_not_shift_the_fields(powershell):
+    """A Subject can contain `|`, as in O=Contoso|Fabrikam. The answer used to be
+    four fields joined by `|`, so half the signer's name became the timestamper.
+
+    No separator in plain text is safe from a Subject, which can hold a line
+    break as well; the script answers in JSON, and this is that answer.
+    """
+    fake_run, _ = powershell
+    fake_run.result = _Completed(
+        _answer("Valid", "Catalog", "CN=Contoso, O=Contoso|Fabrikam", "CN=Contoso TSA") + "\n"
+    )
+
+    result = signature._catalog(Path("whatever.exe"))
+
+    assert result is not None
+    assert result.signer == "CN=Contoso, O=Contoso|Fabrikam"
+    assert result.timestamper == "CN=Contoso TSA"
+
+
 # ── what was already true, and must stay true ───────────────────────────────
 
 
 def test_a_status_other_than_valid_is_not_a_signature(powershell):
     fake_run, _ = powershell
-    fake_run.result = _Completed("NotSigned|None||")
+    fake_run.result = _Completed(_answer("NotSigned", "None"))
 
     assert signature._catalog(Path("whatever.exe")) is None
 
@@ -137,22 +164,120 @@ def test_a_status_other_than_valid_is_not_a_signature(powershell):
 def test_an_embedded_signature_is_not_claimed_as_a_catalog_one(powershell):
     """Only SignatureType Catalog belongs to path B."""
     fake_run, _ = powershell
-    fake_run.result = _Completed("Valid|Embedded|CN=Test|")
+    fake_run.result = _Completed(_answer("Valid", "Embedded", "CN=Test"))
 
     assert signature._catalog(Path("whatever.exe")) is None
 
 
 def test_a_non_zero_exit_is_not_a_signature(powershell):
     fake_run, _ = powershell
-    fake_run.result = _Completed("Valid|Catalog|CN=Test|", returncode=1)
+    fake_run.result = _Completed(_answer("Valid", "Catalog", "CN=Test"), returncode=1)
 
     assert signature._catalog(Path("whatever.exe")) is None
 
 
 def test_the_path_is_quoted_so_it_cannot_close_the_literal(powershell):
-    """A single quote in a filename doubled, which is PowerShell's escape."""
+    """The filename is not in the script at all, so no quote in it can close anything.
+
+    Doubling the ASCII quote was the escape until 2026-10-07, and PowerShell closes
+    a single-quoted literal on four other characters too (U+2018 to U+201B). The
+    path now reaches PowerShell as data, through the environment, and intact.
+    """
     _, calls = powershell
-    signature._catalog(Path("it's here.exe"))
+    path = Path("it's here’.exe")
+    signature._catalog(path)
 
     script = calls[0]["argv"][-1]
-    assert "it''s here.exe" in script, script
+    assert "here" not in script, script
+    assert calls[0]["kwargs"]["env"][signature._TARGET_VARIABLE] == str(path)
+
+
+# ── the filename is data, never code ────────────────────────────────────────
+
+# PowerShell takes U+2018, U+2019, U+201A and U+201B for a single quote as well.
+_SINGLE_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+# Legal on NTFS. With only the ASCII quote doubled, U+2019 closed the literal
+# and the rest of the name ran as PowerShell, with the user's rights.
+INJECTION = "C:\\tmp\\a\u2019; Write-Output PWNED; \u2019b.exe"
+
+# Captured before any test replaces it, for the one test that parses for real.
+_REAL_RUN = subprocess.run
+
+
+def _single_quoted_literal(script: str, after: str) -> str:
+    """The value of the single-quoted literal after `after`, read the way
+    PowerShell's tokenizer reads it: a doubled quote is a literal quote."""
+    i = script.index(after) + len(after)
+    assert script[i] in _SINGLE_QUOTES
+    i += 1
+    out = []
+    while i < len(script):
+        ch = script[i]
+        if ch in _SINGLE_QUOTES:
+            if i + 1 < len(script) and script[i + 1] in _SINGLE_QUOTES:
+                out.append(ch)
+                i += 2
+                continue
+            return "".join(out)
+        out.append(ch)
+        i += 1
+    raise AssertionError("unterminated literal")
+
+
+def test_a_typographic_quote_in_the_name_cannot_close_the_literal(powershell):
+    """Two fixes are sound, and this admits both: the path stays out of the
+    script and reaches PowerShell as data (environment or argument), or it stays
+    in as one literal whose value is exactly the path. A literal that closes
+    early is the one thing refused."""
+    _, calls = powershell
+    signature._catalog(Path(INJECTION))
+
+    argv, kwargs = calls[0]["argv"], calls[0]["kwargs"]
+    script = argv[-1]
+    if "PWNED" in script:
+        assert _single_quoted_literal(script, "-LiteralPath ") == INJECTION
+    else:
+        assert INJECTION in [*argv, *(kwargs.get("env") or {}).values()]
+
+
+def _command_names(script: str, tmp_path: Path, name: str) -> list[str]:
+    """The commands in `script`, by PowerShell's own parser: parsed, never run."""
+    script_file = tmp_path / f"{name}.ps1"
+    script_file.write_text(script, encoding="utf-8-sig")
+    lister = tmp_path / "list.ps1"
+    lister.write_text(
+        "param($p)\n"
+        "$t=$null;$e=$null\n"
+        "$ast=[System.Management.Automation.Language.Parser]::ParseFile($p,[ref]$t,[ref]$e)\n"
+        "$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]},$true)"
+        " | ForEach-Object { $_.GetCommandName() }\n",
+        encoding="utf-8-sig",
+    )
+    try:
+        parsed = _REAL_RUN(
+            ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(lister), str(script_file)],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+        )
+    except OSError:
+        pytest.skip("PowerShell is not available")
+    return [line.strip() for line in parsed.stdout.splitlines() if line.strip()]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="needs PowerShell's parser")
+def test_the_name_adds_no_command_by_powershell_s_own_parser(powershell, tmp_path):
+    """Checked against the real parser, without running anything. The commands
+    are compared with those of the script built for a harmless name rather than
+    with a list written here, so the test does not depend on how the script
+    formats its answer."""
+    _, calls = powershell
+    signature._catalog(Path(INJECTION))
+    signature._catalog(Path("C:\\tmp\\plain.exe"))
+
+    commands = _command_names(calls[0]["argv"][-1], tmp_path, "injected")
+    expected = _command_names(calls[1]["argv"][-1], tmp_path, "plain")
+
+    assert "Get-AuthenticodeSignature" in expected, expected
+    assert "Write-Output" not in commands, commands
+    assert commands == expected, commands

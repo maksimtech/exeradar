@@ -155,7 +155,9 @@ def subject(line: str, label: Label) -> str:
     marked subject again would produce "TLP:RED TLP:RED …".
     """
     tag = label.value
-    if line.startswith(tag):
+    # The first word, not a prefix: "TLP:REDACTED minutes" starts with TLP:RED
+    # and carries no label, and "TLP:AMBER+STRICT" is not TLP:AMBER.
+    if line.split(maxsplit=1)[:1] == [tag]:
         return line
     return f"{tag} {line}"
 

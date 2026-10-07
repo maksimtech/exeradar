@@ -271,6 +271,10 @@ end, as mailradar and cookieradar do; **JSON**, which serialises the whole
 `ExeResult` and is what makes the tool usable from a pipeline; **Markdown** for
 pasting into a ticket.
 
+`analyze` cites from the local cache and reaches the network only with `--online`:
+analysing a file is not a reason to contact anyone, and an uncached provision is
+cited without a hash rather than with a guess.
+
 ---
 
 ## 6. v1 scope

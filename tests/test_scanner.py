@@ -91,6 +91,33 @@ def test_scan_returns_a_result_object_not_a_dict(pe_path):
     assert isinstance(scanner.scan(pe_path), ExeResult)
 
 
+def test_a_pe_whose_name_is_not_ascii_is_analysed_like_any_other(signed_pe_path, tmp_path):
+    r"""`caffè.exe`, or anything under `C:\Users\José`. LIEF opened the path
+    through the narrow API on Windows, so a valid PE with such a name came back
+    as "not a PE file"."""
+    target = tmp_path / "caffè.exe"
+    target.write_bytes(signed_pe_path.read_bytes())
+
+    result = scanner.scan(target)
+
+    assert result.error is None, result.error
+    assert result.format == "PE"
+    assert result.sections == scanner.scan(signed_pe_path).sections
+    assert result.signature.state is SignatureState.EMBEDDED
+
+
+def test_the_sample_is_read_from_a_copy_and_left_as_it_was(pe_path, tmp_path):
+    """The tests that patch the sample patch a copy of it: the committed file
+    still scans, manifest URL and all."""
+    copy = tmp_path / pe_path.name
+    copy.write_bytes(pe_path.read_bytes())
+
+    result = scanner.scan(copy)
+
+    assert result.error is None
+    assert "http://schemas.microsoft.com/SMI/2016/WindowsSettings" in result.strings.urls
+
+
 # --------------------------------------------------------------------------
 # the formats that are not here yet
 # --------------------------------------------------------------------------
@@ -173,3 +200,17 @@ def test_excluding_the_signature_drops_the_certificate_urls(signed_pe_path):
 
     assert len(filtered.urls) < len(everything.urls)
     assert not [u for u in filtered.urls if "/crl/" in u.lower()]
+
+
+def test_a_certificate_table_over_the_sections_does_not_hide_the_strings(
+    forged_certificate_table_pe_path,
+):
+    """The certificate table entry is a header field. Pointed at 0x400 to the
+    end of the file, LIEF finds no signature there, and the range was still left
+    out of string extraction: every URL and path gone from the report, and the
+    `hardcoded_ip` finding with them."""
+    result = scanner.scan(forged_certificate_table_pe_path)
+
+    assert result.signature.state is SignatureState.UNKNOWN   # no signature was read
+    assert "http://schemas.microsoft.com/SMI/2016/WindowsSettings" in result.strings.urls
+    assert "D:\\a\\1\\b\\bin\\amd64\\python.pdb" in result.strings.paths

@@ -13,6 +13,7 @@ would be attributed to the program.
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -78,8 +79,12 @@ def test_end_to_end_on_a_dll_that_is_one_known_library():
         pytest.skip("libcrypto-3-x64.dll is not installed here")
 
     result = scanner.scan(path)
+    # The version the installed DLL states, not the 3.5.8 measured on 2026-10-02:
+    # Git for Windows updates it, and the test was failing over the update.
+    stated = re.findall(rb"OpenSSL (\d+\.\d+\.\d+) \d{1,2} [A-Z][a-z]{2} \d{4}", path.read_bytes())
 
-    assert [(lib.name, lib.version) for lib in result.libraries] == [("openssl", "3.5.8")]
+    assert len(set(stated)) == 1, stated
+    assert [(lib.name, lib.version) for lib in result.libraries] == [("openssl", stated[0].decode())]
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="the corpus is a Windows install")

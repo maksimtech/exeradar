@@ -23,15 +23,22 @@ the file still matches what somebody signed, not whether anybody should have.
 
 from __future__ import annotations
 
+import json
+import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lief
 
+from exeradar.formats import pe
 from exeradar.models import Certificate, Signature, SignatureState
 
 _POWERSHELL_TIMEOUT = 60
+
+# Where path B hands PowerShell the file to look at. See `_catalog`.
+_TARGET_VARIABLE = "EXERADAR_TARGET"
 
 # UNKNOWN has more than one cause, and a reader is told which. This one is about
 # the platform and not about the file; law_checker matches on it to decide which
@@ -57,7 +64,7 @@ def signed_regions(path: str | Path) -> list[tuple[int, int]]:
     """
     path = Path(path)
     try:
-        binary = lief.PE.parse(str(path))
+        binary = pe.parse(path)
     except Exception:  # noqa: BLE001 - nothing to exclude in a file we cannot read
         return []
     if binary is None:
@@ -149,7 +156,7 @@ def _unreadable(path: Path) -> str | None:
     built it of something the network did.
     """
     try:
-        binary = lief.PE.parse(str(path))
+        binary = pe.parse(path)
     except Exception as exc:  # noqa: BLE001 - reported, not hidden
         return f"not a readable PE: {type(exc).__name__}"
     if binary is None:
@@ -266,7 +273,7 @@ def _verdict(flags) -> tuple[bool | None, tuple[str, ...]]:
 
 def _embedded(path: Path) -> Signature | None:
     try:
-        binary = lief.PE.parse(str(path))
+        binary = pe.parse(path)
     except Exception:  # noqa: BLE001 - a file we cannot parse is not signed
         return None
     if binary is None or not binary.signatures:
@@ -388,7 +395,7 @@ def _timestamp(path: Path) -> tuple[str | None, str | None, str | None]:
     try:
         from asn1crypto import cms
 
-        binary = lief.PE.parse(str(path))
+        binary = pe.parse(path)
         if binary is None or not binary.signatures:
             return None, None, None
 
@@ -421,7 +428,7 @@ def timestamp_of(content) -> tuple[str | None, str | None, str | None]:
         info = tsp.TSTInfo.load(signed["encap_content_info"]["content"].contents)
         when = info["gen_time"].native
         return (
-            f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+            _in_utc(when),
             _authority(signed),
             None if when else "the token carried no gen_time",
         )
@@ -431,6 +438,21 @@ def timestamp_of(content) -> tuple[str | None, str | None, str | None]:
         return _countersigned(counter["values"][0], content)
 
     return None, None, None
+
+
+def _in_utc(when: datetime | None) -> str | None:
+    """A signing time as text, converted to UTC rather than labelled as it.
+
+    DER requires `Z`, and BER or a malformed blob does not: `+0200` was printed
+    as local time with " UTC" after it, two hours off on the date that decides
+    whether an expired certificate is covered. A time with no zone at all says
+    so instead of being given one.
+    """
+    if not when:
+        return None
+    if when.tzinfo is None:
+        return f"{when:%Y-%m-%d %H:%M:%S} (no time zone stated)"
+    return f"{when.astimezone(UTC):%Y-%m-%d %H:%M:%S} UTC"
 
 
 def _countersigned(counter, content) -> tuple[str | None, str | None, str | None]:
@@ -447,7 +469,7 @@ def _countersigned(counter, content) -> tuple[str | None, str | None, str | None
     ]
     when = times[0]["values"][0].native if times else None
     return (
-        f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+        _in_utc(when),
         _named_certificate(counter["sid"], content),
         None if when else "the countersignature carried no signing_time",
     )
@@ -494,11 +516,13 @@ def _catalog(path: Path) -> Signature | None:
     that works today, and the API is the version that stops paying for a
     PowerShell start-up once batch mode makes that cost visible.
     """
-    # The path is interpolated rather than passed as an argument: $args is not
-    # populated under -Command, only under -File, and PowerShell answers with a
-    # parse error. Single quotes are the literal form there, escaped by
-    # doubling, which also makes the value inert.
-    quoted = str(path).replace("'", "''")
+    # The path travels in an environment variable and is never part of the
+    # script. It used to be interpolated as a single-quoted literal with the
+    # ASCII quote doubled, and PowerShell closes that literal on U+2018, U+2019,
+    # U+201A and U+201B as well: a file named `a’; <command>; ’b.exe`, legal on
+    # NTFS, ran <command>. $args is not populated under -Command, which is why it
+    # was interpolated at all; $env: is, and what it holds is data whatever it
+    # contains, so there is no escaping left to get wrong.
     script = (
         # A certificate Subject carries whichever alphabet the CA uses, and
         # PowerShell writes stdout in the console encoding — cp850 or cp1252
@@ -506,15 +530,20 @@ def _catalog(path: Path) -> Signature | None:
         # same file gives the same answer on every Windows install.
         "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;"
         "$ErrorActionPreference='Stop';"
-        f"$s = Get-AuthenticodeSignature -LiteralPath '{quoted}';"
-        '"$($s.Status)|$($s.SignatureType)|$($s.SignerCertificate.Subject)|'
-        '$($s.TimeStamperCertificate.Subject)"'
+        f"$s = Get-AuthenticodeSignature -LiteralPath $env:{_TARGET_VARIABLE};"
+        # JSON, not fields joined by `|`: a Subject may contain the separator
+        # (O=Contoso|Fabrikam), and then part of the signer's name was read as
+        # the timestamper. The values are made strings here because Windows
+        # PowerShell serialises an enum as its number.
+        '[ordered]@{Status="$($s.Status)";Type="$($s.SignatureType)";'
+        'Signer="$($s.SignerCertificate.Subject)";'
+        'Stamper="$($s.TimeStamperCertificate.Subject)"} | ConvertTo-Json -Compress'
     )
     try:
         completed = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=_POWERSHELL_TIMEOUT,
+            timeout=_POWERSHELL_TIMEOUT, env={**os.environ, _TARGET_VARIABLE: str(path)},
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -527,8 +556,15 @@ def _catalog(path: Path) -> Signature | None:
     if not completed.stdout:
         return None
 
-    parts = (completed.stdout.strip().split("|") + [""] * 4)[:4]
-    status, kind, signer, stamper = (part.strip() for part in parts)
+    try:
+        answer = json.loads(completed.stdout)
+    except ValueError:
+        return None
+    if not isinstance(answer, dict):
+        return None
+    status, kind, signer, stamper = (
+        str(answer.get(key) or "").strip() for key in ("Status", "Type", "Signer", "Stamper")
+    )
     if status != "Valid" or kind != "Catalog":
         return None
 

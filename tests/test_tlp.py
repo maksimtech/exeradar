@@ -136,6 +136,15 @@ def test_an_already_marked_subject_is_not_marked_twice():
     assert tlp.subject(once, Label.RED) == once
 
 
+def test_a_subject_is_compared_on_its_first_word_and_not_on_a_prefix():
+    """A subject opening with TLP:REDACTED is not marked TLP:RED, and one opening
+    with TLP:AMBER+STRICT is not TLP:AMBER: both used to be taken as already marked."""
+    assert tlp.subject("TLP:REDACTED minutes", Label.RED).startswith("TLP:RED ")
+    assert tlp.subject("TLP:AMBER+STRICT minutes", Label.AMBER).startswith("TLP:AMBER TLP:AMBER+STRICT")
+    assert tlp.subject("TLP:RED", Label.RED) == "TLP:RED"
+    assert tlp.subject("", Label.RED) == "TLP:RED "
+
+
 def test_the_banner_names_the_standard_the_label_and_the_permission():
     banner = tlp.banner(Label.AMBER_STRICT)
 

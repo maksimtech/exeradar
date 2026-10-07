@@ -7,8 +7,38 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The suite, on the code being published. release.sh runs it before it tags,
+  # and a tag pushed by hand never went through release.sh: nothing here waited
+  # for a test, and a version cannot be taken back off PyPI. Its own job, so the
+  # suite never runs with the publishing token in reach.
+  test:
+    name: Test suite before publishing
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        # --group needs pip >= 25.1 to read PEP 735 [dependency-groups]
+        run: |
+          python -m pip install --upgrade pip
+          pip install --group dev -e .  # NOSONAR
+
+      - name: Run test suite
+        # --ignore=tests/benchmarks: they need pytest-codspeed, which only
+        # codspeed.yml installs.
+        run: pytest tests/ -q --ignore=tests/benchmarks
+
   build-and-publish:
     name: Build and publish to PyPI
+    needs: [test]
     runs-on: ubuntu-26.04
     environment:
       name: pypi
@@ -32,10 +62,18 @@ jobs:
       # is no taking a version back off PyPI. Checked before anything is built.
       # __init__.py holds nothing but the version string, so this import needs
       # none of the package's dependencies.
+      #
+      # Only a tag publishes. The comparison used to apply to tags alone, so a
+      # workflow_dispatch from a branch skipped it and published whatever that
+      # branch held; dispatched from a tag, a rebuild still works.
       - name: Check the tag matches the package version
         run: |
           VERSION=$(python -c "from exeradar import __version__; print(__version__)")
-          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "::error::Only a tag publishes; $GITHUB_REF_NAME is a $GITHUB_REF_TYPE"
+            exit 1
+          fi
+          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match package version $VERSION"
             exit 1
           fi

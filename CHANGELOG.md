@@ -12,7 +12,85 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Security
+
+- **A filename can no longer run PowerShell.** The catalog check (path B, Windows only)
+  put the path into the script as a single-quoted literal and doubled the ASCII quote,
+  and PowerShell closes that literal on U+2018, U+2019, U+201A and U+201B as well: a
+  file named `a’; <command>; ’b.exe`, legal on NTFS, ran `<command>` with the user's
+  rights when `analyze`, `batch` or `verify` reached it — one name in a downloaded folder
+  was enough for `batch`. The path now travels in the `EXERADAR_TARGET` environment
+  variable and is never part of the script, so there is no escaping left to get wrong.
+  Checked against PowerShell's own parser, without running anything.
+
+- **Strings out of the binary are printed, not obeyed.** The console report passed
+  them to Rich as markup: `http://evil.example/[/x]` in a PE ended `analyze` with a
+  `MarkupError`, and a well-formed tag such as `[link=…]` was followed. Every value that
+  comes out of the file — its name, strings, section and DLL names, the signer, errors —
+  is escaped, in `analyze` and in the `batch` table.
+
+- **The Markdown report cannot carry HTML from the binary.** A path such as
+  ``C:\y\`<img src=x onerror=alert(1)>` `` closed its code span and reached the ticket it
+  was pasted into as raw HTML; a section named `a|b` added a column to the table. Code
+  spans now use a fence longer than any run of backticks inside them, pipes are escaped
+  in table cells, and free text — the file name, the signature sentence, library
+  evidence, notes — has `& < > [ ]` written as entities, which cannot turn back into
+  markup whatever precedes them.
+
+- **A forged certificate table no longer hides the file's strings.** The range the
+  header declares for the certificate table was left out of string extraction even when
+  LIEF found no signature in it and even when it covered the sections: pointed at
+  0x400..EOF, it removed every URL, address and path from the report, and the
+  `hardcoded_ip` finding with them. It is skipped now only when a signature was read
+  there, and only past the last section.
+
 ### Fixed
+
+- **A file whose path is not ASCII is analysed on Windows.** LIEF opens a path through
+  the narrow API there, so `caffè.exe`, or anything under `C:\Users\José`, came back as
+  "not a PE file", `verify` answered 2 for a validly signed file, and `batch` dropped it.
+  Python reads the bytes and LIEF parses them (`pe.parse`), on every platform.
+
+- **A countersignature time with an offset is converted to UTC.** `+0200` was printed as
+  local time with " UTC" after it, two hours off on the date that decides whether an
+  expired certificate is covered. A time with no zone at all says so instead of being
+  given one.
+
+- **A catalog signer whose Subject contains `|` keeps its name.** PowerShell's answer was
+  four fields joined by `|`, so `O=Contoso|Fabrikam` lost half of itself to the
+  timestamper. The script now answers in JSON.
+
+- **`--output` into a directory that is not there is refused before the scan**, with exit
+  code 2, instead of a `FileNotFoundError` traceback after it; a write that fails anyway
+  (permissions, a full disk) is reported the same way.
+
+- **`batch` does not follow NTFS junctions.** `Path.rglob` skips symlinks and follows
+  junctions, and one pointing back at its parent — `mklink /J`, no privilege needed —
+  listed the same PE 64 times. `batch -o` with nothing to report now says that no file
+  was written, instead of saying nothing.
+
+- **`tlp.subject` compares the first word, not a prefix:** "TLP:REDACTED minutes" was
+  taken as already marked TLP:RED, and "TLP:AMBER+STRICT" as TLP:AMBER.
+
+- **`first_teams.resolve` does not choose between two exact matches.** An organisation
+  can have more than one member team — a product PSIRT and a corporate CERT, with
+  different addresses and keys — and the first in the response was returned. Both are
+  now candidates, and `psirt` exits 2.
+
+- **PyPI is published from a tag only, and after the suite.** `publish.yml` compared tag
+  and version for tags alone, so a dispatch from a branch published that branch; and it
+  waited for no test. A `test` job, without the publishing token, now comes first.
+
+- **The README examples say what the tool prints**: "2 matching their signature" and
+  the signature sentences of `verify`, which had changed since they were written.
+
+- **`.gitattributes` keeps shell scripts LF.** With `core.autocrlf=true` a Windows
+  checkout turned `release.sh` into CRLF and bash stopped at `set -euo pipefail`.
+
+- **Five tests no longer assert the author's installed DLL versions** (OpenSSL 3.5.8,
+  curl 8.13.0, pcre2 10.48): they failed on any machine that had updated Git for
+  Windows or Windows. The expected version is read from the library's own statement in
+  the same bytes; which library, and nothing else, is still asserted exactly.
 
 - **A dispatched rebuild now stands on the tag it was given.** `docker.yml` can be run by
   hand with the tag of an already published release to rebuild it, and it checked out the
@@ -47,6 +125,23 @@ no version in this file has ever matched — 40 is not a month, and
   ends.
 
 ### Added
+
+- **Findings in the `analyze` report.** ARCHITECTURE.md section 7 separates facts from
+  findings, and the console and Markdown reports showed only the facts: a
+  `signature_invalid` of severity high reached the JSON and the count in `batch` and
+  nobody reading `analyze`. Both now end with the findings, title and severity first.
+
+- **"Provisions applied", as README and ARCHITECTURE.md section 5 describe.**
+  `law_checker.check` was called by nothing, so no report carried a citation or the notes
+  that qualify them (the CRA applies from 11 December 2027; it binds a manufacturer).
+  `analyze` now cites, in the console and in Markdown. The JSON is unchanged: it
+  carries the findings, not the citations.
+
+- **`analyze --online`, and offline by default.** `analyze` cites from the local cache
+  in `~/.exeradar` and downloads nothing; `--online` downloads the texts the findings
+  need and refreshes the cache. A provision the cache does not hold is cited without a
+  hash, and the run says so and suggests `--online`, instead of failing. A clean file
+  touches no network either way.
 
 - **The files the build is told to include are checked to be there.** apkradar lost its
   `LICENSE` out of the working tree on 2026-10-04 and the loss reached `main`: pyproject
@@ -86,6 +181,11 @@ no version in this file has ever matched — 40 is not a month, and
   the version check disabled, a dirty tree allowed, an existing tag no longer
   stopping anything, and the push no longer atomic. All five fail.
 
+### Changed
+
+- **`law_checker.check` takes `offline` instead of `**context`.** The extra keywords were
+  passed to `findings_of` and `notes_of`, which accept none, so any of them ended in a
+  `TypeError` from inside the check.
 
 ## [2026.41] - 2026-10-03
 

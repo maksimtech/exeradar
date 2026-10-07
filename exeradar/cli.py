@@ -13,9 +13,16 @@ renderer.
 from __future__ import annotations
 
 import contextlib
+import os
 import sys
+from collections.abc import Iterator
+from pathlib import Path
+from typing import TYPE_CHECKING
 
 import typer
+
+if TYPE_CHECKING:
+    from exeradar.law_checker import LawCheckResult
 
 
 def enable_utf8_output() -> None:
@@ -68,6 +75,90 @@ def main(
     pass
 
 
+# IO_REPARSE_TAG_MOUNT_POINT. Written out because the stat module defines it on
+# Windows only: referenced from there, batch raised AttributeError on Linux at the
+# first subdirectory.
+_JUNCTION_TAG = 0xA0000003
+
+
+def _is_link(path: str) -> bool:
+    """A symlink, or an NTFS junction, which is not one as far as islink knows.
+
+    Read from the reparse tag rather than os.path.isjunction, which is 3.12 and
+    later; the tag is what that function reads, and only Windows has one.
+    """
+    if os.path.islink(path):
+        return True
+    try:
+        tag = getattr(os.lstat(path), "st_reparse_tag", 0)
+    except OSError:
+        return False
+    return tag == _JUNCTION_TAG
+
+
+def _files_under(root: Path) -> Iterator[Path]:
+    """Every file below `root`, never entering a directory through a link.
+
+    Path.rglob does not follow symlinks and does follow junctions: one pointing
+    back at its own parent, which `mklink /J` makes without any privilege, put
+    the same PE in the report 64 times, once per level until the path length
+    ran out. A directory reached through a link is walked where it really is,
+    if it is under `root` at all, or not at all.
+    """
+    for top, directories, files in os.walk(root):
+        directories[:] = [name for name in directories if not _is_link(os.path.join(top, name))]
+        for name in files:
+            path = Path(top) / name
+            if path.is_file():
+                yield path
+
+
+def _check_output(output: str) -> None:
+    """Refuse an --output that cannot be honoured, before any work is done.
+
+    The extension has to name a format, and the directory has to exist: a
+    missing one used to surface as a FileNotFoundError traceback after the
+    whole scan, which is the trade the extension check was there to avoid.
+    """
+    from exeradar import report
+
+    try:
+        report.format_for(output)
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    if not Path(output).parent.is_dir():
+        typer.secho(f"no such directory for the report: {Path(output).parent}",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+
+
+def _write_failed(output: str, error: OSError) -> typer.Exit:
+    """A report that could not be written: said, with exit code 2, not a traceback.
+
+    The directory was there when the run started; permissions, a full disk or a
+    directory removed meanwhile only show at the write.
+    """
+    typer.secho(f"cannot write {output}: {error.strerror or error}", fg=typer.colors.RED, err=True)
+    return typer.Exit(2)
+
+
+def _say_what_the_cache_lacks(law: LawCheckResult, online: bool) -> None:
+    """A provision cited without a hash, and how to get one.
+
+    Offline over an empty cache is the first run of every installation: the
+    report says "no text available" act by act, and this says, once, that
+    --online is what fills the cache.
+    """
+    missing = [status.act.name for status in law.acts if status.source == "unavailable"]
+    if missing and not online:
+        typer.secho(
+            f"no cached text for {', '.join(missing)}: cited without a hash; "
+            "run again with --online to download the texts",
+            fg=typer.colors.YELLOW, err=True,
+        )
+
+
 @app.command()
 def analyze(
     path: str = typer.Argument(..., help="Executable to analyse"),
@@ -77,6 +168,11 @@ def analyze(
         None, "--tlp",
         help="Mark the written report with a FIRST TLP 2.0 label: clear, green, "
              "amber, amber+strict, red. Omitted, the report is unmarked.",
+    ),
+    online: bool = typer.Option(
+        False, "--online",
+        help="Download the texts of the provisions cited and refresh the local cache. "
+             "Without it nothing is downloaded and the cache is cited.",
     ),
 ) -> None:
     """Analyse one executable."""
@@ -97,19 +193,35 @@ def analyze(
     # Checked before the scan: refusing a filename after a minute of work
     # would be a poor trade, and the extension is knowable up front.
     if output:
-        try:
-            report.format_for(output)
-        except ValueError as exc:
-            typer.secho(str(exc), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from exc
+        _check_output(output)
 
     result = scan(path)
 
+    # The provisions the findings concern, for the "Provisions applied" section
+    # README and ARCHITECTURE.md section 5 describe and nothing used to print.
+    # Offline unless --online: analysing a file is not a reason to reach the
+    # network, so the texts are cited from the local cache and downloaded only
+    # when asked. A clean file cites nothing either way. Failing to cite is
+    # said, and never costs the analysis that has already been done.
+    law = None
+    if not result.error:
+        from exeradar import law_checker
+
+        try:
+            law = law_checker.check(result, offline=not online)
+        except Exception as error:  # noqa: BLE001 - reported, never a traceback
+            typer.secho(f"provisions not cited: {error}", fg=typer.colors.YELLOW, err=True)
+        else:
+            _say_what_the_cache_lacks(law, online)
+
     if output and not result.error:
-        chosen = report.write(result, output, tlp_label=label)
+        try:
+            chosen = report.write(result, output, tlp_label=label, law=law)
+        except OSError as error:
+            raise _write_failed(output, error) from error
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
     else:
-        report.to_console(result)
+        report.to_console(result, law=law)
 
     if result.error:
         raise typer.Exit(1)
@@ -127,8 +239,6 @@ def batch(
     ),
 ) -> None:
     """Analyse every PE in a directory, recursively."""
-    from pathlib import Path
-
     from exeradar import report
 
     # Before the file is opened: a label the standard does not define is
@@ -151,22 +261,25 @@ def batch(
     # Both checks before the walk: a directory of binaries takes real time, and
     # refusing the filename afterwards would throw all of it away.
     if output:
-        try:
-            report.format_for(output)
-        except ValueError as exc:
-            typer.secho(str(exc), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from exc
+        _check_output(output)
 
     # Sorted, so two runs over the same directory produce the same report and a
     # diff of the two means something.
-    targets = sorted(p for p in root.rglob("*") if p.is_file() and format_of(p) == "PE")
+    targets = sorted(p for p in _files_under(root) if format_of(p) == "PE")
     results = [scan(target) for target in targets]
 
     report.to_console_many(results)
 
     if output and results:
-        chosen = report.write_many(results, output, tlp_label=label)
+        try:
+            chosen = report.write_many(results, output, tlp_label=label)
+        except OSError as error:
+            raise _write_failed(output, error) from error
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
+    elif output:
+        # Nothing to report is not a report, so no file — but the caller asked for
+        # one by name, and a missing file with no word about it reads as a failure.
+        typer.secho(f"{output} not written: no PE files found", fg=typer.colors.YELLOW)
 
 
 @app.command()
@@ -186,8 +299,6 @@ def verify(
     this tool cannot tell; failing a build over that would be failing it over a
     missing capability rather than over the file.
     """
-    from pathlib import Path
-
     from exeradar import report, signature
     from exeradar.models import SignatureState
     from exeradar.scanner import format_of
