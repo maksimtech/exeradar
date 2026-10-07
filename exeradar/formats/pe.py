@@ -102,6 +102,23 @@ def _as_text(name: str | bytes) -> str:
         return name.decode("utf-8", errors="replace")
     return name
 
+
+def parse(path: str | Path) -> lief.PE.Binary | None:
+    """LIEF's parser, handed the bytes rather than the name.
+
+    On Windows LIEF opens a path through the narrow API, so a file called
+    caffè.exe — or any file under C:\\Users\\José — "failed to open" and came
+    back as None: a valid PE reported as not a PE, and a signed one as
+    unreadable. Python opens the file and LIEF only parses it, which is the same
+    on every platform. None when the file cannot be read, as LIEF answered.
+    """
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return None
+    return lief.PE.parse(data)
+
+
 def overlay_start(path: str | Path) -> int | None:
     """Where the mapped image ends and appended data begins.
 
@@ -118,7 +135,7 @@ def overlay_start(path: str | Path) -> int | None:
     finding.
     """
     try:
-        binary = lief.PE.parse(str(path))
+        binary = parse(path)
     except Exception:  # noqa: BLE001 - any parse failure is the same answer
         return None
     if binary is None or not binary.sections:
@@ -198,7 +215,7 @@ class PEParser:
         self.path = Path(path)
 
     def parse(self, result: ExeResult) -> ExeResult:
-        binary = lief.PE.parse(str(self.path))
+        binary = parse(self.path)
         if binary is None:
             result.error = f"not a PE file: {self.path.name}"
             return result

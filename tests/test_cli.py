@@ -153,6 +153,21 @@ def test_verify_passes_a_signed_binary(sample):
     assert "embedded" in outcome.stdout
 
 
+def test_verify_answers_the_same_whatever_the_file_is_called(sample, tmp_path):
+    """LIEF opened the path through the narrow API on Windows: the same validly
+    signed file answered 0 as `plain.exe` and 2 as `Привет.exe`."""
+    plain = tmp_path / "plain.exe"
+    shutil.copy(sample, plain)
+    accented = tmp_path / "Привет.exe"
+    shutil.copy(sample, accented)
+
+    expected = runner.invoke(app, ["verify", str(plain)]).exit_code
+    outcome = runner.invoke(app, ["verify", str(accented)])
+
+    assert expected == 0
+    assert outcome.exit_code == expected, outcome.output
+
+
 def test_verify_fails_a_binary_that_was_changed_after_signing(sample, tmp_path):
     """The case the exit code exists for: the bytes no longer match the signature.
 

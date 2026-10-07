@@ -91,6 +91,21 @@ def test_scan_returns_a_result_object_not_a_dict(pe_path):
     assert isinstance(scanner.scan(pe_path), ExeResult)
 
 
+def test_a_pe_whose_name_is_not_ascii_is_analysed_like_any_other(signed_pe_path, tmp_path):
+    r"""`caffè.exe`, or anything under `C:\Users\José`. LIEF opened the path
+    through the narrow API on Windows, so a valid PE with such a name came back
+    as "not a PE file"."""
+    target = tmp_path / "caffè.exe"
+    target.write_bytes(signed_pe_path.read_bytes())
+
+    result = scanner.scan(target)
+
+    assert result.error is None, result.error
+    assert result.format == "PE"
+    assert result.sections == scanner.scan(signed_pe_path).sections
+    assert result.signature.state is SignatureState.EMBEDDED
+
+
 # --------------------------------------------------------------------------
 # the formats that are not here yet
 # --------------------------------------------------------------------------

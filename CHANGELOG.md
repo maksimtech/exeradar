@@ -12,7 +12,27 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Security
+
+- **A filename can no longer run PowerShell.** The catalog check (path B, Windows only)
+  put the path into the script as a single-quoted literal and doubled the ASCII quote,
+  and PowerShell closes that literal on U+2018, U+2019, U+201A and U+201B as well: a
+  file named `a’; <command>; ’b.exe`, legal on NTFS, ran `<command>` with the user's
+  rights when `analyze`, `batch` or `verify` reached it — one name in a downloaded folder
+  was enough for `batch`. The path now travels in the `EXERADAR_TARGET` environment
+  variable and is never part of the script, so there is no escaping left to get wrong.
+  Checked against PowerShell's own parser, without running anything.
+
 ### Fixed
+
+- **A file whose path is not ASCII is analysed on Windows.** LIEF opens a path through
+  the narrow API there, so `caffè.exe`, or anything under `C:\Users\José`, came back as
+  "not a PE file", `verify` answered 2 for a validly signed file, and `batch` dropped it.
+  Python reads the bytes and LIEF parses them (`pe.parse`), on every platform.
+
+- **A catalog signer whose Subject contains `|` keeps its name.** PowerShell's answer was
+  four fields joined by `|`, so `O=Contoso|Fabrikam` lost half of itself to the
+  timestamper. The script now answers in JSON.
 
 - **Five tests no longer assert the author's installed DLL versions** (OpenSSL 3.5.8,
   curl 8.13.0, pcre2 10.48): they failed on any machine that had updated Git for
