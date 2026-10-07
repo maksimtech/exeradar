@@ -14,6 +14,11 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **Five tests no longer assert the author's installed DLL versions** (OpenSSL 3.5.8,
+  curl 8.13.0, pcre2 10.48): they failed on any machine that had updated Git for
+  Windows or Windows. The expected version is read from the library's own statement in
+  the same bytes; which library, and nothing else, is still asserted exactly.
+
 - **A dispatched rebuild now stands on the tag it was given.** `docker.yml` can be run by
   hand with the tag of an already published release to rebuild it, and it checked out the
   default branch — while the image is built from that checkout.
