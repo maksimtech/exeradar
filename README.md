@@ -137,7 +137,7 @@ $ exeradar batch ./downloads
  nested.exe    4942b86a6597  embedded   0
  tampered.exe  ec7e1e10899c  embedded   1
 
-3 files, 2 signed and verified, 1 with findings
+3 files, 2 matching their signature, 1 with findings
 ```
 
 With `--output` it writes the whole run: a JSON array, or one Markdown section
@@ -151,7 +151,7 @@ stays fast on a large binary.
 ```
 $ exeradar verify python.exe
 embedded
-Embedded Authenticode signature, valid.
+Embedded Authenticode signature; the file matches what was signed.
 signer    C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
 signed    2026-08-05 11:45:32 UTC
 $ echo $?
@@ -164,7 +164,7 @@ its signer, and no longer describes the file:
 ```
 $ exeradar verify tampered.exe
 embedded
-Embedded Authenticode signature, present but not valid.
+Embedded Authenticode signature, and the file does not match what was signed (bad_digest, bad_signature).
 signer    C=US, ST=Oregon, L=Beaverton, O=Python Software Foundation, CN=Python Software Foundation
 signed    2026-08-05 11:45:32 UTC
 $ echo $?

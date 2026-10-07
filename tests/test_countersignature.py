@@ -91,3 +91,41 @@ def test_the_rfc3161_form_still_works():
     assert problem is None
     assert when and when.endswith("UTC")
     assert authority and "Time Stamping" in authority
+
+
+def _with_signing_time(time: cms.Time) -> cms.ContentInfo:
+    """The fixture with the countersignature's signing_time replaced."""
+    content = cms.ContentInfo.load(FIXTURE.read_bytes())
+    signer = content["content"]["signer_infos"][0]
+    counter = next(a for a in signer["unsigned_attrs"] if a["type"].native == "counter_signature")["values"][0]
+    attribute = next(a for a in counter["signed_attrs"] if a["type"].native == "signing_time")
+    attribute["values"] = cms.SetOfTime([time])
+    return content
+
+
+def test_a_time_with_an_offset_is_converted_to_utc():
+    """`220309062954+0200` is 04:29:54 UTC. It was printed as the local time
+    with " UTC" after it: two hours off, on the date that decides whether an
+    expired certificate is covered."""
+    from asn1crypto import core
+
+    with_offset = core.UTCTime.load(b"\x17\x11" + b"220309062954+0200")
+
+    when, _, problem = signature.timestamp_of(_with_signing_time(cms.Time({"utc_time": with_offset})))
+
+    assert problem is None
+    assert when == "2022-03-09 04:29:54 UTC"
+
+
+def test_a_time_with_no_zone_is_not_called_utc():
+    """A GeneralizedTime without `Z` — BER, not DER — does not say which zone it
+    is in, and asn1crypto gives back a naive datetime. Calling it UTC would be
+    making the zone up."""
+    from asn1crypto import core
+
+    naive = core.GeneralizedTime.load(b"\x18\x0e" + b"20220309062954")
+
+    when, _, _ = signature.timestamp_of(_with_signing_time(cms.Time({"generalized_time": naive})))
+
+    assert when is not None and when.startswith("2022-03-09 06:29:54")
+    assert "UTC" not in when

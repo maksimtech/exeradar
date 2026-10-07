@@ -1,0 +1,5 @@
+# Shell scripts are read by bash, which takes a CR as part of the command: with
+# core.autocrlf=true a Windows checkout turned release.sh into CRLF and the
+# script stopped at `set -euo pipefail`. LF on every platform, whatever the
+# local git configuration says.
+*.sh text eol=lf

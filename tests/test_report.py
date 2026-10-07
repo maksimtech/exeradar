@@ -510,3 +510,27 @@ def test_write_many_refuses_an_unknown_extension(results, tmp_path):
     with pytest.raises(ValueError):
         report.write_many(results, tmp_path / "out.doc")
 
+
+# --------------------------------------------------------------------------
+# the README shows what this prints
+# --------------------------------------------------------------------------
+
+
+def test_the_output_examples_in_the_readme_are_what_the_tool_prints():
+    """The `verify` and `batch` examples showed sentences the code had stopped
+    printing: "Embedded Authenticode signature, valid.", "... present but not
+    valid." and "3 files, 2 signed and verified, 1 with findings"."""
+    import re
+    from pathlib import Path
+
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    ok = report.signature_sentence(Signature(state=SignatureState.EMBEDDED, verified=True))
+    bad_prefix = "Embedded Authenticode signature, and the file does not match what was signed ("
+    open_prefix = "Embedded Authenticode signature, not checked to a conclusion ("
+
+    for line in readme.splitlines():
+        line = line.strip()
+        if line.startswith("Embedded Authenticode signature"):
+            assert line == ok or line.startswith((bad_prefix, open_prefix)), line
+        if re.match(r"^\d+ files, ", line):
+            assert re.match(r"^\d+ files, \d+ matching their signature, \d+ with findings$", line), line

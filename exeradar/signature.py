@@ -27,6 +27,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import lief
@@ -427,7 +428,7 @@ def timestamp_of(content) -> tuple[str | None, str | None, str | None]:
         info = tsp.TSTInfo.load(signed["encap_content_info"]["content"].contents)
         when = info["gen_time"].native
         return (
-            f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+            _in_utc(when),
             _authority(signed),
             None if when else "the token carried no gen_time",
         )
@@ -437,6 +438,21 @@ def timestamp_of(content) -> tuple[str | None, str | None, str | None]:
         return _countersigned(counter["values"][0], content)
 
     return None, None, None
+
+
+def _in_utc(when: datetime | None) -> str | None:
+    """A signing time as text, converted to UTC rather than labelled as it.
+
+    DER requires `Z`, and BER or a malformed blob does not: `+0200` was printed
+    as local time with " UTC" after it, two hours off on the date that decides
+    whether an expired certificate is covered. A time with no zone at all says
+    so instead of being given one.
+    """
+    if not when:
+        return None
+    if when.tzinfo is None:
+        return f"{when:%Y-%m-%d %H:%M:%S} (no time zone stated)"
+    return f"{when.astimezone(UTC):%Y-%m-%d %H:%M:%S} UTC"
 
 
 def _countersigned(counter, content) -> tuple[str | None, str | None, str | None]:
@@ -453,7 +469,7 @@ def _countersigned(counter, content) -> tuple[str | None, str | None, str | None
     ]
     when = times[0]["values"][0].native if times else None
     return (
-        f"{when:%Y-%m-%d %H:%M:%S} UTC" if when else None,
+        _in_utc(when),
         _named_certificate(counter["sid"], content),
         None if when else "the countersignature carried no signing_time",
     )

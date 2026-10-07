@@ -124,3 +124,17 @@ def test_the_rule_accepts_the_correct_forms(tmp_path):
         encoding="utf-8",
     )
     assert _offenders(good) == []
+
+
+# ── line endings: the other thing a checkout decides about text ─────────────
+
+
+def test_shell_scripts_are_checked_out_with_lf():
+    """Without `.gitattributes`, a Windows checkout with core.autocrlf=true wrote
+    release.sh with CRLF and bash stopped at `set -euo pipefail` — green on
+    Linux, red on Windows, and a message that says nothing about line endings."""
+    attributes = ROOT / ".gitattributes"
+
+    assert attributes.is_file()
+    text = attributes.read_text(encoding="utf-8")
+    assert "*.sh" in text and "eol=lf" in text

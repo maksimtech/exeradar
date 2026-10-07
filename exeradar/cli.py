@@ -113,6 +113,36 @@ def _files_under(root: Path) -> Iterator[Path]:
                 yield path
 
 
+def _check_output(output: str) -> None:
+    """Refuse an --output that cannot be honoured, before any work is done.
+
+    The extension has to name a format, and the directory has to exist: a
+    missing one used to surface as a FileNotFoundError traceback after the
+    whole scan, which is the trade the extension check was there to avoid.
+    """
+    from exeradar import report
+
+    try:
+        report.format_for(output)
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    if not Path(output).parent.is_dir():
+        typer.secho(f"no such directory for the report: {Path(output).parent}",
+                    fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+
+
+def _write_failed(output: str, error: OSError) -> typer.Exit:
+    """A report that could not be written: said, with exit code 2, not a traceback.
+
+    The directory was there when the run started; permissions, a full disk or a
+    directory removed meanwhile only show at the write.
+    """
+    typer.secho(f"cannot write {output}: {error.strerror or error}", fg=typer.colors.RED, err=True)
+    return typer.Exit(2)
+
+
 def _say_what_the_cache_lacks(law: LawCheckResult, online: bool) -> None:
     """A provision cited without a hash, and how to get one.
 
@@ -163,11 +193,7 @@ def analyze(
     # Checked before the scan: refusing a filename after a minute of work
     # would be a poor trade, and the extension is knowable up front.
     if output:
-        try:
-            report.format_for(output)
-        except ValueError as exc:
-            typer.secho(str(exc), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from exc
+        _check_output(output)
 
     result = scan(path)
 
@@ -189,7 +215,10 @@ def analyze(
             _say_what_the_cache_lacks(law, online)
 
     if output and not result.error:
-        chosen = report.write(result, output, tlp_label=label, law=law)
+        try:
+            chosen = report.write(result, output, tlp_label=label, law=law)
+        except OSError as error:
+            raise _write_failed(output, error) from error
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
     else:
         report.to_console(result, law=law)
@@ -232,11 +261,7 @@ def batch(
     # Both checks before the walk: a directory of binaries takes real time, and
     # refusing the filename afterwards would throw all of it away.
     if output:
-        try:
-            report.format_for(output)
-        except ValueError as exc:
-            typer.secho(str(exc), fg=typer.colors.RED, err=True)
-            raise typer.Exit(2) from exc
+        _check_output(output)
 
     # Sorted, so two runs over the same directory produce the same report and a
     # diff of the two means something.
@@ -246,7 +271,10 @@ def batch(
     report.to_console_many(results)
 
     if output and results:
-        chosen = report.write_many(results, output, tlp_label=label)
+        try:
+            chosen = report.write_many(results, output, tlp_label=label)
+        except OSError as error:
+            raise _write_failed(output, error) from error
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
 
 

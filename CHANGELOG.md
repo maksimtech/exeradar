@@ -51,18 +51,36 @@ no version in this file has ever matched — 40 is not a month, and
   "not a PE file", `verify` answered 2 for a validly signed file, and `batch` dropped it.
   Python reads the bytes and LIEF parses them (`pe.parse`), on every platform.
 
+- **A countersignature time with an offset is converted to UTC.** `+0200` was printed as
+  local time with " UTC" after it, two hours off on the date that decides whether an
+  expired certificate is covered. A time with no zone at all says so instead of being
+  given one.
+
 - **A catalog signer whose Subject contains `|` keeps its name.** PowerShell's answer was
   four fields joined by `|`, so `O=Contoso|Fabrikam` lost half of itself to the
   timestamper. The script now answers in JSON.
+
+- **`--output` into a directory that is not there is refused before the scan**, with exit
+  code 2, instead of a `FileNotFoundError` traceback after it; a write that fails anyway
+  (permissions, a full disk) is reported the same way.
 
 - **`batch` does not follow NTFS junctions.** `Path.rglob` skips symlinks and follows
   junctions, and one pointing back at its parent — `mklink /J`, no privilege needed —
   listed the same PE 64 times.
 
+- **`tlp.subject` compares the first word, not a prefix:** "TLP:REDACTED minutes" was
+  taken as already marked TLP:RED, and "TLP:AMBER+STRICT" as TLP:AMBER.
+
 - **`first_teams.resolve` does not choose between two exact matches.** An organisation
   can have more than one member team — a product PSIRT and a corporate CERT, with
   different addresses and keys — and the first in the response was returned. Both are
   now candidates, and `psirt` exits 2.
+
+- **The README examples say what the tool prints**: "2 matching their signature" and
+  the signature sentences of `verify`, which had changed since they were written.
+
+- **`.gitattributes` keeps shell scripts LF.** With `core.autocrlf=true` a Windows
+  checkout turned `release.sh` into CRLF and bash stopped at `set -euo pipefail`.
 
 - **Five tests no longer assert the author's installed DLL versions** (OpenSSL 3.5.8,
   curl 8.13.0, pcre2 10.48): they failed on any machine that had updated Git for

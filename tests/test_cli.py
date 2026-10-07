@@ -147,6 +147,18 @@ def test_batch_writes_nothing_when_it_found_nothing(tmp_path):
     assert not target.exists()
 
 
+def test_batch_refuses_an_output_in_a_directory_that_is_not_there(sample, tmp_path):
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    shutil.copy(sample, tree / "one.exe")
+    output = tmp_path / "missing-dir" / "run.json"
+
+    outcome = runner.invoke(app, ["batch", str(tree), "--output", str(output)])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 2
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="junctions are NTFS")
 def test_batch_does_not_list_a_file_twice_through_a_junction(sample, tmp_path):
     """Path.rglob skips symlinks and follows junctions: one pointing back at its
@@ -205,6 +217,31 @@ def test_analyze_does_not_crash_on_a_url_with_square_brackets(pe_with_a_string):
     assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
     assert outcome.exit_code == 0
     assert "http://evil.example/[/x]" in outcome.output
+
+
+def test_analyze_refuses_an_output_in_a_directory_that_is_not_there(sample, tmp_path):
+    """The extension was checked before the scan and the directory was not: a
+    missing one surfaced as a FileNotFoundError traceback after all the work."""
+    output = tmp_path / "missing-dir" / "report.json"
+
+    outcome = runner.invoke(app, ["analyze", str(sample), "--output", str(output)])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code != 0
+
+
+def test_analyze_a_write_that_fails_after_the_scan_is_not_a_traceback(sample, tmp_path, monkeypatch):
+    """The directory is there and the write still fails — permissions, a full
+    disk: checking up front is not enough, the write has to be handled too."""
+    def denied(self, *args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(self))
+
+    monkeypatch.setattr(Path, "write_text", denied)
+    outcome = runner.invoke(app, ["analyze", str(sample), "--output", str(tmp_path / "r.json")])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 2
+    assert "Permission denied" in outcome.output
 
 
 # --------------------------------------------------------------------------
