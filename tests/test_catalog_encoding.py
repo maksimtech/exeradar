@@ -281,3 +281,90 @@ def test_the_name_adds_no_command_by_powershell_s_own_parser(powershell, tmp_pat
     assert "Get-AuthenticodeSignature" in expected, expected
     assert "Write-Output" not in commands, commands
     assert commands == expected, commands
+
+
+# ── the real PowerShell: what `_catalog_answer` relies on ───────────────────
+
+# The not-JSON and not-an-object branches were taken out of `_catalog_answer`
+# because the script cannot reach them: exit 0 comes with one JSON object, and
+# every failure is a non-zero exit with nothing on stdout. That is a claim about
+# PowerShell, so it is asked of PowerShell, and only Windows has the one that
+# answers it.
+windows_only = pytest.mark.skipif(sys.platform != "win32", reason="path B is Windows PowerShell")
+
+_FIELDS = ["Status", "Type", "Signer", "Stamper"]
+
+
+@pytest.fixture
+def denied(tmp_path):
+    """A file this user may not read: an ACL deny entry, removed afterwards."""
+    import os
+    import shutil
+
+    target = tmp_path / "denied.exe"
+    shutil.copy(Path(sys.executable), target)
+    who = os.environ.get("USERNAME", "")
+    made = _REAL_RUN(["icacls", str(target), "/deny", f"{who}:(R)"],
+                     capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if made.returncode != 0:
+        pytest.skip(f"icacls could not deny read: {made.stdout}{made.stderr}")
+    try:
+        yield target
+    finally:
+        _REAL_RUN(["icacls", str(target), "/remove:d", who], capture_output=True)
+
+
+@windows_only
+@pytest.mark.parametrize("kind", ["catalog", "embedded", "unsigned", "empty", "text"])
+def test_exit_0_is_always_one_json_object(kind, request, tmp_path):
+    """Whatever the file, an answer is the four values in one object, and the
+    catalog is claimed for the catalog-signed file alone."""
+    if kind == "catalog":
+        target = request.getfixturevalue("catalog_pe_path")
+    elif kind == "embedded":
+        target = request.getfixturevalue("signed_pe_path")
+    elif kind == "unsigned":
+        target = request.getfixturevalue("unsigned_pe_path")
+    else:
+        target = tmp_path / f"{kind}.exe"
+        target.write_bytes(b"" if kind == "empty" else b"not an executable\r\n")
+
+    completed = signature._ask_powershell(target)
+
+    assert completed.returncode == 0, completed.stderr
+    answer = json.loads(completed.stdout)
+    assert isinstance(answer, dict) and list(answer) == _FIELDS, completed.stdout
+    found = signature._catalog(target)
+    assert (found is not None) is (kind == "catalog"), found
+    if found is not None:
+        assert found.signer and found.signer.startswith("CN=Microsoft Windows"), found.signer
+
+
+@windows_only
+@pytest.mark.parametrize("kind", ["missing", "directory", "denied"])
+def test_every_failure_is_a_non_zero_exit_with_nothing_on_stdout(kind, request, tmp_path):
+    """No such file, a directory, a file this user may not read: each ends the
+    script at Get-AuthenticodeSignature, and none of them is a signature."""
+    target = {
+        "missing": lambda: tmp_path / "missing.exe",
+        "directory": lambda: tmp_path,
+        "denied": lambda: request.getfixturevalue("denied"),
+    }[kind]()
+
+    completed = signature._ask_powershell(target)
+
+    assert completed.returncode != 0
+    assert completed.stdout == ""
+    assert completed.stderr
+    assert signature._catalog(target) is None
+
+
+def test_no_powershell_is_no_answer(unsigned_pe_path):
+    """A machine without PowerShell cannot be asked: "I could not tell", the
+    reply to every failure of path B, and not a traceback."""
+    import shutil
+
+    if shutil.which("powershell"):
+        pytest.skip("PowerShell is installed here")
+
+    assert signature._catalog(unsigned_pe_path) is None

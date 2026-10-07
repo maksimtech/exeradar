@@ -516,6 +516,19 @@ def _catalog(path: Path) -> Signature | None:
     that works today, and the API is the version that stops paying for a
     PowerShell start-up once batch mode makes that cost visible.
     """
+    try:
+        completed = _ask_powershell(path)
+        return _catalog_answer(completed.returncode, completed.stdout)
+    # ValueError is an answer that is not JSON, which `_catalog_answer` explains
+    # cannot happen; should it happen anyway, it is PowerShell not answering, as
+    # much as a PowerShell that would not start, and the honest reply to both is
+    # "I could not tell" rather than a traceback out of `analyze` or `verify`.
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def _ask_powershell(path: Path) -> subprocess.CompletedProcess[str]:
+    """Run the one script path B has, about `path`, and return what it said."""
     # The path travels in an environment variable and is never part of the
     # script. It used to be interpolated as a single-quoted literal with the
     # ASCII quote doubled, and PowerShell closes that literal on U+2018, U+2019,
@@ -539,29 +552,32 @@ def _catalog(path: Path) -> Signature | None:
         'Signer="$($s.SignerCertificate.Subject)";'
         'Stamper="$($s.TimeStamperCertificate.Subject)"} | ConvertTo-Json -Compress'
     )
-    try:
-        completed = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=_POWERSHELL_TIMEOUT, env={**os.environ, _TARGET_VARIABLE: str(path)},
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if completed.returncode != 0:
+    return subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+        timeout=_POWERSHELL_TIMEOUT, env={**os.environ, _TARGET_VARIABLE: str(path)},
+    )
+
+
+def _catalog_answer(returncode: int, stdout: str | None) -> Signature | None:
+    """What PowerShell's reply says about the file: a catalog signature, or None."""
+    if returncode != 0:
         return None
     # capture_output collects the pipes on reader threads, so a decoding failure
     # there does not reach this frame as an exception: it leaves stdout as None.
-    # Dereferencing that raised AttributeError, which the except above does not
-    # cover — a crash instead of the honest "I could not tell".
-    if not completed.stdout:
+    # Dereferencing that raised AttributeError, which the except in `_catalog`
+    # does not cover — a crash instead of the honest "I could not tell".
+    if not stdout:
         return None
 
-    try:
-        answer = json.loads(completed.stdout)
-    except ValueError:
-        return None
-    if not isinstance(answer, dict):
-        return None
+    # Exit 0 is always one JSON object, so it is parsed without a fallback. The
+    # script prints one hashtable through ConvertTo-Json and nothing else, and
+    # under $ErrorActionPreference='Stop' every failure — no such file, a
+    # directory, access denied, a file in use — ends it with exit code 1 before
+    # that line, which is the test above. Measured with the real PowerShell on
+    # 2026-10-07 and held by test_catalog_encoding.py; the not-JSON and
+    # not-an-object branches that were here could not be reached.
+    answer = json.loads(stdout)
     status, kind, signer, stamper = (
         str(answer.get(key) or "").strip() for key in ("Status", "Type", "Signer", "Stamper")
     )
