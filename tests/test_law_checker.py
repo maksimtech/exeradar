@@ -453,21 +453,32 @@ def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypat
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]
 
 
-def test_offline_cites_from_the_cache_the_hashes_an_online_run_stored(cache, monkeypatch):
+def test_offline_cites_from_the_cache_the_hashes_an_online_run_stored(cache, network):
     """The module cites the cached copy when there is no network, and offline by
-    choice is the same: nothing downloaded, the hashes and dates read from the cache."""
+    choice is the same: nothing downloaded, the hashes and dates read from the cache.
+
+    Derived data: the cache is filled from the saved pages in ACT_FIXTURES by the
+    parser and the cache an online run uses after a download, so it holds what
+    such a run stores; only the download date, NOW, is set here.
+    """
     unsigned = result(state=SignatureState.UNSIGNED, verified=False)
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
-    online_run = check(unsigned, cache=cache, now=NOW)
+    stamp = law_fetcher.utc_stamp(NOW)
+    stored: dict = {}
+    for act, fixture in ACT_FIXTURES.items():
+        units = tuple(dict.fromkeys(ref.split("(")[0] for a, ref in FINDING_ARTICLES["unsigned"] if a == act))
+        html = (FIXTURES / fixture).read_text(encoding="utf-8")
+        for ref, text in law_fetcher.parse_articles(html, units).items():
+            provision = Provision.from_text(ref, text, stamp, act.celex)
+            stored[provision.key] = provision
+    cache.update(stored, checked_at=stamp)
 
-    def no_network(*args, **kwargs):
-        raise AssertionError("offline must not download")
-
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", no_network)
     offline_run = check(unsigned, cache=cache, now=NOW, offline=True)
 
-    assert all(citation.sha256 for citation in online_run.citations)
-    assert [c.sha256 for c in offline_run.citations] == [c.sha256 for c in online_run.citations]
+    assert network == []
+    expected = [stored[(act.celex, ref)].sha256 for act, ref in FINDING_ARTICLES["unsigned"]]
+    assert all(expected)
+    assert [c.sha256 for c in offline_run.citations] == expected
+    assert {c.version_date for c in offline_run.citations} == {"2026-09-21"}
     assert {status.source for status in offline_run.acts} == {"cache"}
 
 

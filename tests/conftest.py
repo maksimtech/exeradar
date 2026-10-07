@@ -22,7 +22,7 @@ exactly why `SignatureState.UNKNOWN` exists.
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -182,3 +182,55 @@ def catalog_pe_path() -> Path:
         if candidate.is_file() and not _has_embedded_signature(candidate):
             return candidate
     pytest.skip("no catalog-signed PE found")
+
+
+@pytest.fixture
+def network(monkeypatch) -> Iterator[list[str]]:
+    """The first line of every request that tried to leave the machine.
+
+    A real listener on the loopback interface, named as the proxy for every
+    scheme through the environment variables httpx reads — httpx being the only
+    HTTP client this tool has. It answers nothing and closes the connection, so
+    a request meets a network that is not there and fails the way an offline
+    machine fails it; the test is left with the list of who tried.
+
+    The same probe hears `analyze --online` reach for the acts, which is what
+    makes an empty list mean something rather than a probe that never worked.
+    """
+    import socket
+    import threading
+
+    server = socket.create_server(("127.0.0.1", 0))
+    server.settimeout(0.1)
+    heard: list[str] = []
+    done = threading.Event()
+
+    def listen() -> None:
+        while not done.is_set():
+            try:
+                connection, _ = server.accept()
+            except OSError:   # the timeout, so that `done` is looked at
+                continue
+            with connection:
+                connection.settimeout(5)
+                try:
+                    first = connection.recv(4096).split(b"\r\n", 1)[0]
+                except OSError:
+                    first = b"(nothing sent)"
+                # Recorded before the close: the client only fails once the
+                # connection is gone, so the line is there when it returns.
+                heard.append(first.decode("latin-1"))
+
+    listener = threading.Thread(target=listen, daemon=True)
+    listener.start()
+    proxy = f"http://127.0.0.1:{server.getsockname()[1]}"
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        monkeypatch.setenv(name, proxy)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    try:
+        yield heard
+    finally:
+        done.set()
+        listener.join()
+        server.close()
