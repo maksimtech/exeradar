@@ -209,3 +209,13 @@ def test_a_file_that_is_not_a_pe_is_an_error_not_a_crash(tmp_path):
     result = pe.PEParser(not_a_pe).parse(ExeResult(path=str(not_a_pe), size=0, sha256=""))
     assert result.error
     assert result.format is None
+
+
+@pytest.mark.parametrize("make", [
+    lambda tmp_path: tmp_path / "gone.exe",   # nothing at that path
+    lambda tmp_path: tmp_path,                 # a directory: there, and not a file
+], ids=["missing", "directory"])
+def test_a_path_that_cannot_be_opened_parses_to_none(tmp_path, make):
+    """Python opens the file and LIEF only parses the bytes, so a path Python
+    cannot read has to come back as LIEF answered for one: None, not OSError."""
+    assert pe.parse(make(tmp_path)) is None

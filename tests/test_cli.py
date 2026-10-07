@@ -217,6 +217,67 @@ def test_batch_does_not_enter_a_directory_twice_through_a_symlink(sample, tmp_pa
     assert len(json.loads(out.read_text(encoding="utf-8"))) == 1
 
 
+def test_an_entry_that_is_gone_by_the_time_it_is_checked_is_not_a_link(tmp_path):
+    """os.walk lists a directory and the link check comes after: whatever was
+    removed in between cannot be lstat-ed, and is not a link to stay out of."""
+    from exeradar.cli import _is_link
+
+    assert _is_link(str(tmp_path / "removed-meanwhile")) is False
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="PATH_MAX is the Linux limit")
+def test_batch_walks_past_a_directory_whose_path_is_too_long_to_stat(sample, tmp_path):
+    """A directory can be listed while the path of an entry in it is longer than
+    PATH_MAX: lstat fails with ENAMETOOLONG, and that is not a reason to fail
+    the whole run over the PE files it can read."""
+    import errno
+
+    root = tmp_path / "tree"
+    root.mkdir()
+    shutil.copy(sample, root / "one.exe")
+    limit = os.pathconf(root, "PC_PATH_MAX")
+    name = "d" * 250
+    deepest = root
+    while len(os.fsencode(deepest / name)) < limit:
+        deepest = deepest / name
+        deepest.mkdir()
+    # Created relative to its parent, the only way to make it: its full path
+    # does not fit in a system call.
+    parent = os.open(deepest, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.mkdir(name, dir_fd=parent)
+    finally:
+        os.close(parent)
+    with pytest.raises(OSError) as too_long:
+        os.lstat(os.path.join(deepest, name))
+    assert too_long.value.errno == errno.ENAMETOOLONG
+    out = tmp_path / "run.json"
+
+    outcome = runner.invoke(app, ["batch", str(root), "--output", str(out)])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 0, outcome.output
+    assert len(json.loads(out.read_text(encoding="utf-8"))) == 1
+
+
+def test_batch_a_write_that_fails_after_the_walk_is_not_a_traceback(sample, tmp_path):
+    """The report's directory is there, so the run starts; the name itself is a
+    directory, so the write fails after every file has been scanned. Said, with
+    exit code 2, as analyze does."""
+    tree = tmp_path / "tree"
+    tree.mkdir()
+    shutil.copy(sample, tree / "one.exe")
+    output = tmp_path / "run.json"
+    output.mkdir()
+
+    outcome = runner.invoke(app, ["batch", str(tree), "--output", str(output)])
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 2
+    assert f"cannot write {output}" in outcome.output
+    assert output.is_dir()
+
+
 # --------------------------------------------------------------------------
 # analyze
 # --------------------------------------------------------------------------
@@ -257,6 +318,27 @@ def test_analyze_a_write_that_fails_after_the_scan_is_not_a_traceback(sample, tm
     assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
     assert outcome.exit_code == 2
     assert "Permission denied" in outcome.output
+
+
+def test_analyze_a_citation_that_fails_costs_only_the_citation(tampered):
+    """EXERADAR_HOME naming the home of a user this machine does not have —
+    copied from another machine's setup — leaves no directory for the cache, and
+    law_checker raises. The analysis is already done: it is printed, the
+    failure is one warning line, and the exit code is the analysis's.
+
+    USERPROFILE and HOMEPATH are removed because Windows expands `~name` from
+    them whether or not that user exists; without them it cannot either.
+    """
+    outcome = runner.invoke(app, ["analyze", str(tampered)], env={
+        "EXERADAR_HOME": "~exeradar-no-such-user/cache",
+        "USERPROFILE": None, "HOMEPATH": None, "HOMEDRIVE": None,
+    })
+
+    assert outcome.exception is None or isinstance(outcome.exception, SystemExit), repr(outcome.exception)
+    assert outcome.exit_code == 0, outcome.output
+    assert "provisions not cited: Could not determine home directory" in outcome.output
+    assert "signature_invalid" in outcome.output
+    assert "Provisions applied" not in outcome.output
 
 
 # --------------------------------------------------------------------------

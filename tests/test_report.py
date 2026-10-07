@@ -301,6 +301,37 @@ def test_markdown_carries_the_provisions_and_the_notes_that_qualify_them(tmp_pat
     assert "SHA256: not available" in text
 
 
+def test_markdown_says_which_act_was_cited_from_the_local_cache(tmp_path):
+    """Offline over a cache that holds the text, the citation carries its hash —
+    and the report has to say the hash is the cached copy's, not today's.
+
+    Derived data: the cache is filled from tests/fixtures/cra_it_excerpt.html, a
+    saved page of the CRA, by the same parser and cache the tool uses after a
+    download; only the download date is set here.
+    """
+    from pathlib import Path
+
+    from exeradar import law_checker, law_fetcher
+    from exeradar.law_cache import LawCache
+
+    html = (Path(__file__).parent / "fixtures" / "cra_it_excerpt.html").read_text(encoding="utf-8")
+    fetched_at = "2026-09-21T12:00:00Z"
+    provisions = [
+        law_fetcher.Provision.from_text(ref, text, fetched_at, law_checker.CRA.celex)
+        for ref, text in law_fetcher.parse_articles(html, ("Allegato I, Parte I", "13")).items()
+    ]
+    cache = LawCache(tmp_path / "law_cache.json")
+    cache.update({provision.key: provision for provision in provisions}, checked_at=fetched_at)
+    result = _unsigned()
+
+    text = report.to_markdown(result, law=law_checker.check(result, offline=True, cache=cache))
+
+    assert (f"{law_checker.CRA.name}: cited from the local cache "
+            "(offline: the text was not downloaded)") in text
+    cached = next(p for p in provisions if p.article == "Allegato I, Parte I(2)(f)")
+    assert cached.sha256 in text
+
+
 # --------------------------------------------------------------------------
 # console
 # --------------------------------------------------------------------------

@@ -129,3 +129,24 @@ def test_a_time_with_no_zone_is_not_called_utc():
 
     assert when is not None and when.startswith("2022-03-09 06:29:54")
     assert "UTC" not in when
+
+
+def test_a_countersignature_without_a_signing_time_says_so():
+    """No time is not a time: the answer is None, and the reason names the
+    attribute that was missing, so it cannot be taken for "never stamped".
+
+    Derived data: the fixture with the `signing_time` attribute removed from its
+    countersignature, every other byte as recorded.
+    """
+    content = cms.ContentInfo.load(FIXTURE.read_bytes())
+    signer = content["content"]["signer_infos"][0]
+    counter = next(a for a in signer["unsigned_attrs"] if a["type"].native == "counter_signature")["values"][0]
+    counter["signed_attrs"] = cms.CMSAttributes(
+        [a for a in counter["signed_attrs"] if a["type"].native != "signing_time"]
+    )
+
+    when, authority, problem = signature.timestamp_of(content)
+
+    assert when is None
+    assert problem == "the countersignature carried no signing_time"
+    assert authority is not None and "DigiCert Timestamp 2021" in authority
