@@ -66,7 +66,8 @@ no version in this file has ever matched — 40 is not a month, and
 
 - **`batch` does not follow NTFS junctions.** `Path.rglob` skips symlinks and follows
   junctions, and one pointing back at its parent — `mklink /J`, no privilege needed —
-  listed the same PE 64 times.
+  listed the same PE 64 times. `batch -o` with nothing to report now says that no file
+  was written, instead of saying nothing.
 
 - **`tlp.subject` compares the first word, not a prefix:** "TLP:REDACTED minutes" was
   taken as already marked TLP:RED, and "TLP:AMBER+STRICT" as TLP:AMBER.
@@ -75,6 +76,10 @@ no version in this file has ever matched — 40 is not a month, and
   can have more than one member team — a product PSIRT and a corporate CERT, with
   different addresses and keys — and the first in the response was returned. Both are
   now candidates, and `psirt` exits 2.
+
+- **PyPI is published from a tag only, and after the suite.** `publish.yml` compared tag
+  and version for tags alone, so a dispatch from a branch published that branch; and it
+  waited for no test. A `test` job, without the publishing token, now comes first.
 
 - **The README examples say what the tool prints**: "2 matching their signature" and
   the signature sentences of `verify`, which had changed since they were written.

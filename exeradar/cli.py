@@ -276,6 +276,10 @@ def batch(
         except OSError as error:
             raise _write_failed(output, error) from error
         typer.secho(f"{chosen} report written to {output}", fg=typer.colors.GREEN)
+    elif output:
+        # Nothing to report is not a report, so no file — but the caller asked for
+        # one by name, and a missing file with no word about it reads as a failure.
+        typer.secho(f"{output} not written: no PE files found", fg=typer.colors.YELLOW)
 
 
 @app.command()

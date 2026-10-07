@@ -147,6 +147,21 @@ def test_batch_writes_nothing_when_it_found_nothing(tmp_path):
     assert not target.exists()
 
 
+def test_batch_says_the_report_it_was_asked_for_was_not_written(tmp_path):
+    """No file is still right when there is nothing to report, but whoever
+    named one has to be told it is not there."""
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    target = tmp_path / "report.json"
+
+    outcome = runner.invoke(app, ["batch", str(empty), "--output", str(target)])
+
+    assert outcome.exit_code == 0
+    assert not target.exists()
+    assert "report.json" in outcome.output
+    assert "not written" in outcome.output
+
+
 def test_batch_refuses_an_output_in_a_directory_that_is_not_there(sample, tmp_path):
     tree = tmp_path / "tree"
     tree.mkdir()
