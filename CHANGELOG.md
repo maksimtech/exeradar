@@ -12,6 +12,9 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+
+## [2026.42] - 2026-10-08
+
 ### Security
 
 - **A filename can no longer run PowerShell.** The catalog check (path B, Windows only)
@@ -21,7 +24,8 @@ no version in this file has ever matched — 40 is not a month, and
   rights when `analyze`, `batch` or `verify` reached it — one name in a downloaded folder
   was enough for `batch`. The path now travels in the `EXERADAR_TARGET` environment
   variable and is never part of the script, so there is no escaping left to get wrong.
-  Checked against PowerShell's own parser, without running anything.
+  Checked against PowerShell's own parser, and on Windows by running it: a name that
+  carries `ni pwned` is analysed as the catalog-signed file it is, and no `pwned` appears.
 
 - **Strings out of the binary are printed, not obeyed.** The console report passed
   them to Rich as markup: `http://evil.example/[/x]` in a PE ended `analyze` with a
@@ -186,6 +190,26 @@ no version in this file has ever matched — 40 is not a month, and
 - **`law_checker.check` takes `offline` instead of `**context`.** The extra keywords were
   passed to `findings_of` and `notes_of`, which accept none, so any of them ended in a
   `TypeError` from inside the check.
+
+- **The catalog check has no branch left for an answer that is not JSON.** Exit 0 from
+  the script is always one JSON object — `[ordered]@{…} | ConvertTo-Json -Compress` under
+  `$ErrorActionPreference='Stop'` — and every failure (no such file, a directory, access
+  denied, a file in use) is a non-zero exit with nothing on stdout, which was already
+  turned away. Measured with the real PowerShell on 2026-10-07, on catalog-signed,
+  embedded-signed, unsigned, empty and text files, and held by `test_catalog_encoding.py`.
+  Should it happen anyway, a `ValueError` from `json.loads` joins the `OSError` and
+  `SubprocessError` path: "I could not tell", never a traceback out of `analyze` or
+  `verify`.
+
+- **The tests behind the fixes above ask real inputs, not mocks.** PowerShell is the real
+  one on Windows; elsewhere it is its real replies, recorded in
+  `tests/fixtures/powershell_catalog_replies.json`, which a Windows case asks again and
+  compares, so a recording that stops being true fails rather than lingers. "No network
+  without `--online`" is a listener on 127.0.0.1 named as the proxy for every scheme, and
+  it hears `--online` reach europa.eu — which is what makes an empty list evidence. The
+  two exact matches in FIRST's directory are its real answer to `?q=EY`, "EY" and
+  "EY CSIRT", in `tests/fixtures/first_teams_ey.json`. Against `main` before the fixes,
+  each converted test fails on the defect it protects.
 
 ## [2026.41] - 2026-10-03
 
@@ -902,6 +926,11 @@ signing, and the legal provisions the findings concern.
   `LibraryNotFoundError`.
 - Requires Python 3.11 or later; tested on 3.11, 3.12, 3.13 and 3.14.
 
-[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.09.2...HEAD
+[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.42...HEAD
+[2026.42]: https://github.com/maksimtech/exeradar/releases/tag/v2026.42
+[2026.41]: https://github.com/maksimtech/exeradar/releases/tag/v2026.41
+[2026.40.1]: https://github.com/maksimtech/exeradar/releases/tag/v2026.40.1
+[2026.40]: https://github.com/maksimtech/exeradar/releases/tag/v2026.40
+[2026.09.3]: https://github.com/maksimtech/exeradar/releases/tag/v2026.09.3
 [2026.09.2]: https://github.com/maksimtech/exeradar/releases/tag/v2026.09.2
 [2026.09.1]: https://github.com/maksimtech/exeradar/releases/tag/v2026.09.1
