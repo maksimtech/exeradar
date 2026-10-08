@@ -35,12 +35,16 @@ from pathlib import Path
 
 import pytest
 
+from exeradar import law_checker, scanner
+from tests.benchmarks import test_bench_law
+
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARKS = ROOT / "tests" / "benchmarks"
 WORKFLOWS = ROOT / ".github" / "workflows"
 CODSPEED = WORKFLOWS / "codspeed.yml"
 TESTS_WORKFLOW = WORKFLOWS / "tests.yml"
 PYPROJECT = ROOT / "pyproject.toml"
+FIXTURE = ROOT / "tests" / "fixtures" / "python.exe"
 
 
 def benchmark_files() -> list[Path]:
@@ -140,3 +144,37 @@ def test_no_benchmark_reads_the_clock():
         assert not re.search(r"datetime\.now\(|time\.time\(", text), (
             f"{path.name} reads the clock; pin the moment instead"
         )
+
+
+def test_the_law_benchmark_exercises_every_rule():
+    """`test_findings_for` has to put every rule of `findings_of` to work.
+
+    The fixture alone does not: python.exe is signed, verified, countersigned
+    and carries no address, so `findings_for` on it returns an empty list in
+    about 6 µs — thirty Python calls, almost all of it `_expiry`. On CodSpeed
+    the measured window is then mostly the harness, and on 2026-10-08 the same
+    code, the same pytest-codspeed 5.0.3, the same runner image and the same
+    CPython 3.12.15 measured 219.6 µs on main and 339 µs on PR #5, which touched
+    only `.github/workflows/release.yml` — a −35% regression on nothing.
+
+    The benchmark now walks one derived ExeResult per rule, and this test is
+    what keeps that true: a rule added to `findings_of` without a case here
+    fails this before it fails to be measured. `known_vulnerabilities` is in
+    SEVERITY and in the map but is produced by nothing yet — FUTURE_FINDINGS is
+    where that is declared, and `test_law_checker.py` checks that it is the
+    only one — so it is not asked of the benchmark.
+    """
+    scanned = scanner.scan(FIXTURE)
+    assert scanned.error is None, scanned.error
+
+    emitted = {
+        finding.id
+        for case in test_bench_law.cases(scanned).values()
+        for finding in law_checker.findings_for(case, now=test_bench_law.NOW)
+    }
+    produced = set(law_checker.SEVERITY) - law_checker.FUTURE_FINDINGS
+
+    assert emitted == produced, (
+        f"the benchmark exercises {sorted(emitted) or 'no rule'}; "
+        f"findings_of can produce {sorted(produced)}"
+    )
