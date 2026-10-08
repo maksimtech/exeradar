@@ -16,12 +16,16 @@ fails the test; a listed one stays visible until somebody closes it.
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+RELEASE = WORKFLOWS / "release.yml"
 
 # Required of every Radar, whatever it does.
 CORE = {
@@ -105,3 +109,69 @@ def test_no_workflow_is_here_without_being_accounted_for():
 
     found = {path.stem for path in WORKFLOWS.glob("*.yml")}
     assert found <= known, f"undescribed workflows: {sorted(found - known)}"
+
+
+# --- What release.yml publishes --------------------------------------------
+#
+# The CHANGELOG is written by hand and is the release notes: it says why a
+# thing changed, which the list of merged pull requests GitHub generates
+# never does. mailradar's release.yml has read it from the start; this one
+# shipped `generate_release_notes: true` and the bare tag as a name until
+# 2026.42, whose notes had to be rewritten by hand with `gh release edit`.
+
+
+def release() -> dict:
+    import yaml
+
+    return yaml.safe_load(RELEASE.read_text(encoding="utf-8"))
+
+
+def release_step() -> dict:
+    steps = release()["jobs"]["release"]["steps"]
+    return next(step for step in steps if "action-gh-release" in step.get("uses", ""))
+
+
+def test_the_release_notes_are_the_changelog_section_not_the_pull_requests():
+    with_ = release_step()["with"]
+    scripts = " ".join(str(step.get("run", "")) for step in release()["jobs"]["release"]["steps"])
+
+    assert "generate_release_notes" not in with_, "GitHub's list of PRs says what changed and never why"
+    assert "steps.changelog.outputs" in str(with_.get("body", "")), "the body does not come from a changelog step"
+    assert "CHANGELOG.md" in scripts, "no step reads CHANGELOG.md"
+
+
+def test_the_release_is_named_after_the_product_not_the_bare_tag():
+    name = str(release_step()["with"].get("name", ""))
+
+    assert name.startswith("ExeRadar "), f"release name is {name!r}, not 'ExeRadar <version>'"
+    assert "steps.version.outputs.VERSION" in name
+
+
+def test_the_changelog_step_finds_this_version_in_the_changelog(tmp_path):
+    """The step is plain bash and awk, so it is run here as GitHub would run it,
+    on the CHANGELOG as it is and the version as it is. An empty section would
+    silently ship the fallback `Release <version>`; that is what this catches."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("needs bash")
+    version = next(
+        line.split('"')[1] for line in (ROOT / "exeradar" / "__init__.py").read_text(encoding="utf-8").splitlines()
+        if line.startswith("__version__")
+    )
+    steps = release()["jobs"]["release"]["steps"]
+    step = next(step for step in steps if "CHANGELOG.md" in str(step.get("run", "")))
+    # The version reaches the script through env, never pasted in as ${{ }}.
+    assert "${{" not in step["run"]
+    assert step["env"]["VERSION"] == "${{ steps.version.outputs.VERSION }}"
+    output = tmp_path / "github_output"
+    output.touch()
+    env = {**os.environ, "GITHUB_OUTPUT": str(output), "VERSION": version}
+
+    outcome = subprocess.run([bash, "-c", step["run"]], cwd=ROOT, env=env, capture_output=True, text=True,
+                             encoding="utf-8", errors="replace")
+
+    assert outcome.returncode == 0, outcome.stdout + outcome.stderr
+    notes = output.read_text(encoding="utf-8").split("NOTES<<EOF\n", 1)[1].rsplit("\nEOF", 1)[0].strip()
+    assert notes, f"CHANGELOG.md has an empty section for {version}"
+    assert notes != f"Release {version}", f"the fallback was used: no section for {version} in CHANGELOG.md"
+    assert notes.startswith("###"), notes[:80]
