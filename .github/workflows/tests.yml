@@ -14,7 +14,19 @@ jobs:
       fail-fast: false
       matrix:
         # Keep in sync with the classifiers in pyproject.toml
+        # (tests/test_codecov_contract.py checks that they match).
         python-version: ["3.11", "3.12", "3.13", "3.14"]
+        experimental: [false]
+        include:
+          # The next Python, ahead of its final: 3.15.0 ships on 2026-10-09
+          # (PEP 790). This row may fail without failing the suite; it is
+          # here to learn early, and it becomes a stable row once the
+          # classifier does.
+          - python-version: "3.15-dev"
+            experimental: true
+    # Keyed on the matrix, not a bare `true`: the stable rows still fail the
+    # summary job below.
+    continue-on-error: ${{ matrix.experimental }}
     steps:
       - uses: actions/checkout@v7
       - name: Set up Python ${{ matrix.python-version }}

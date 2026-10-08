@@ -69,3 +69,58 @@ def test_the_upload_is_given_a_token(workflow):
 
 def test_the_coverage_is_measured_on_this_package(workflow):
     assert "--cov=exeradar" in workflow
+
+
+# The matrix the guard above points into. Added on 2026-10-08, the day before
+# Python 3.15.0 final (PEP 790): the stable rows are the versions the package
+# claims to support, and the next one runs ahead of them as a row that may
+# fail without reddening the suite. Both halves drift silently otherwise — a
+# classifier nobody tests, or a `-dev` row that stays after the final ships.
+
+PYPROJECT = ROOT / "pyproject.toml"
+
+
+def _test_job(workflow: str) -> dict:
+    import yaml
+
+    parsed = yaml.safe_load(workflow)
+    jobs = [job for job in parsed["jobs"].values() if "matrix" in job.get("strategy", {})]
+    assert len(jobs) == 1, "expected exactly one job with a Python matrix"
+    return jobs[0]
+
+
+def _classified_versions() -> list[str]:
+    import tomllib
+
+    classifiers = tomllib.loads(PYPROJECT.read_text(encoding="utf-8"))["project"]["classifiers"]
+    found = [m.group(1) for c in classifiers if (m := re.fullmatch(r"Programming Language :: Python :: (3\.\d+)", c))]
+    assert found, "pyproject.toml declares no `Programming Language :: Python :: 3.x`"
+    return found
+
+
+def test_the_stable_matrix_is_the_list_of_classifiers(workflow):
+    """One list, written twice. The comment in tests.yml says "keep in sync";
+    this is what does."""
+    stable = [str(v) for v in _test_job(workflow)["strategy"]["matrix"]["python-version"]]
+    assert stable == _classified_versions()
+
+
+def test_the_next_python_runs_as_an_experimental_row(workflow):
+    """The version after the last classifier, as `-dev`, and nothing else in
+    `include`: the row exists to find out early, not to be a second matrix."""
+    matrix = _test_job(workflow)["strategy"]["matrix"]
+    major, minor = _classified_versions()[-1].split(".")
+    expected = f"{major}.{int(minor) + 1}-dev"
+
+    assert matrix.get("experimental") == [False], "the stable rows are not marked stable"
+    include = matrix.get("include") or []
+    assert include == [{"python-version": expected, "experimental": True}], (
+        f"expected one experimental row for {expected}, found {include}"
+    )
+
+
+def test_an_experimental_row_cannot_redden_the_suite(workflow):
+    """`continue-on-error` keyed on the matrix, not a bare `true`: the stable
+    rows must still fail the summary job the branch ruleset requires."""
+    job = _test_job(workflow)
+    assert job.get("continue-on-error") == "${{ matrix.experimental }}"
