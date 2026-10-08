@@ -12,6 +12,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Changed
+
+- **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may
+  fail without failing the check. 3.15.0 final ships on 2026-10-09 (PEP 790); the row
+  is there to learn before the classifier moves, and it becomes a stable row when it
+  does. The stable rows must now equal the `Programming Language :: Python :: 3.x`
+  classifiers in `pyproject.toml`, and `tests/test_codecov_contract.py` enforces both.
 
 ## [2026.42] - 2026-10-08
 
