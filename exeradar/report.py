@@ -45,6 +45,12 @@ _IMPORTS_SHOWN = 8
 # search; the whole thing is in the JSON, where something will read it.
 _HASH_SHOWN = 12
 
+# The import column is at least this wide, and as wide as the longest name shown.
+# It was exactly this wide: `api-ms-win-core-libraryloader-l1-2-0.dll` is 40
+# characters, and on notepad.exe, cmd.exe and git.exe its count sat six places to
+# the right of every other row's.
+_IMPORT_COLUMN = 34
+
 
 def format_for(path: str | Path) -> str:
     """The output format the filename asks for.
@@ -354,10 +360,12 @@ def to_console(result: ExeResult, console: Console | None = None,
         f"{sum(len(i.functions) for i in result.imports)} functions — "
         f"{', '.join(categories) if categories else 'no category claimed'}"
     )
-    for imported in sorted(result.imports, key=lambda i: -len(i.functions))[:_IMPORTS_SHOWN]:
+    shown = sorted(result.imports, key=lambda i: -len(i.functions))[:_IMPORTS_SHOWN]
+    width = max([_IMPORT_COLUMN, *(len(imported.dll) for imported in shown)])
+    for imported in shown:
         marks = pe.categorise(imported.dll, imported.functions)
         suffix = f"  [cyan]{', '.join(sorted(marks))}[/cyan]" if marks else ""
-        console.print(f"  {escape(f'{imported.dll:<34}')} {len(imported.functions):>4}{suffix}")
+        console.print(f"  {escape(f'{imported.dll:<{width}}')} {len(imported.functions):>4}{suffix}")
     if len(result.imports) > _IMPORTS_SHOWN:
         console.print(f"  [dim]…and {len(result.imports) - _IMPORTS_SHOWN} more[/dim]")
     console.print()

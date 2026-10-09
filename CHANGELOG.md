@@ -84,6 +84,10 @@ no version in this file has ever matched — 40 is not a month, and
   one segment of three characters, anywhere — `/go/src/github.com/docker/cli/…`,
   Docker's GOPATH, opens with two and stays.
 
+- **The import column is as wide as the longest name shown.** It was 34 characters,
+  and `api-ms-win-core-libraryloader-l1-2-0.dll` is 40: on `notepad.exe`, `cmd.exe` and
+  `git.exe` one count sat six places to the right of the others.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may
