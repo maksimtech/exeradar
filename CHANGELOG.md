@@ -69,6 +69,15 @@ no version in this file has ever matched — 40 is not a month, and
   its bracket, `Go_(programming_language)` keeps the one it opened, and
   `https://proxy.golang.org.` keeps its root dot.
 
+- **An identifier that ends in a delegated word is not a host.** `powershell.exe`
+  reported eleven hosts and all were .NET namespaces (`System.Net.Ping`,
+  `System.IO`); `docker.exe` 103, of which 89 were Go symbols (`bytes.Compare`,
+  `errors.As`) or debris (`0y.nf`, `LG.HK`); `python314.dll` had `StreamReader.read`.
+  A label written in both cases is an identifier — DNS is case-insensitive and
+  nobody writes a hostname in CamelCase — and a host needs one label of three
+  characters, where it needed two (`t.co` joins `x.co` as the cost). `.cat` is a
+  Windows catalog before it is Catalonia: `WIREGUARD.CAT` is a file.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

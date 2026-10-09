@@ -547,3 +547,87 @@ def test_a_root_dot_is_kept_when_nothing_follows_the_host():
     """`https://proxy.golang.org.` is a fully qualified name, and Go's own
     source writes it that way; it is only a sentence's full stop after a path."""
     assert strings.classify(["https://proxy.golang.org."]).urls == ["https://proxy.golang.org."]
+
+
+# --------------------------------------------------------------------------
+# identifiers that end in a delegated word
+# --------------------------------------------------------------------------
+
+# Reported as hosts on 2026-10-09, verbatim. Go symbol names out of docker.exe,
+# go.exe and wireguard.exe; .NET namespaces out of powershell.exe; Python and
+# JavaScript dotted names out of python314.dll and node.exe; Chromium histogram
+# names out of Code.exe. Every suffix — .compare, .as, .read, .net, .io, .ping,
+# .map, .store, .google — is a delegated TLD, which is what let them through.
+IDENTIFIERS = [
+    "bytes.Compare", "errors.As", "io.nopCloser.Read", "time.Time.Date",
+    "System.Net.Ping", "System.IO", "System.Diagnostics.Tools",
+    "StreamReader.read", "Array.prototype.map", "Atomics.store",
+    "Net.QuicSession.ZeroRttReason.Google", "Media.WatchTime.Audio.AC",
+]
+
+# Five characters of binary debris with a country code on the end, and the
+# `LG.HK` that three Go binaries share.
+DEBRIS = ["0y.nf", "6J.vA", "8Q.bo", "LG.HK", "IY.Uy", "HH.mm", "qq.ua"]
+
+# Real, from the same files: an all-caps name (dns.sb, as Code.exe writes it), a
+# label of digits, a brand TLD, a three-letter label with a two-letter suffix.
+REAL_HOSTS = ["DNS.SB", "1dot1dot1dot1.cloudflare-dns.com", "8888.google", "2mdn.net", "aka.ms", "WWW.EXAMPLE.COM"]
+
+
+@pytest.mark.parametrize("text", IDENTIFIERS)
+def test_a_label_in_mixed_case_is_an_identifier_not_a_host(text):
+    """DNS is case-insensitive, so a program has no reason to write a hostname
+    in CamelCase; a .NET namespace, a Go symbol and a JavaScript property are
+    written in nothing else. One label with both cases decides it."""
+    assert strings.classify([text]).hosts == []
+
+
+@pytest.mark.parametrize("text", DEBRIS)
+def test_two_two_character_labels_are_debris(text):
+    """`g.iG` was already refused on its one-character label. Go binaries
+    produce the two-character form by the dozen — four random printable bytes
+    and a dot — and `go.mu`, `LG.HK` cost nothing real: a host with no label of
+    three letters is `t.co`, and that was given up when `x.co` was."""
+    assert strings.classify([text]).hosts == []
+
+
+@pytest.mark.parametrize("text", REAL_HOSTS)
+def test_a_host_written_as_hosts_are_written_still_comes_through(text):
+    assert strings.classify([text]).hosts == [text]
+
+
+def test_a_windows_catalog_file_is_a_file():
+    """wireguard.exe carries its drivers' catalogs by name: `WIREGUARD.CAT`,
+    `WIREGUARD-ARM64.CAT`. `.cat` is Catalonia's TLD and the extension of the
+    very files path B of the signature check reads; here the file wins."""
+    assert strings.classify(["WIREGUARD.CAT", "wireguard-arm64.cat"]).hosts == []
+
+
+# --------------------------------------------------------------------------
+# four bytes with a slash in the middle
+# --------------------------------------------------------------------------
+
+# Reported as paths on 2026-10-09: docker.exe 2,218 of them, node.exe 250,
+# Code.exe 87. The minimum string length is four, and `/o/O` is four printable
+# bytes that happen to include two slashes.
+NOT_PATHS = ["/o/O", "/1/4", "/./u", "/u/I", "/-/S/k/", "/a/a/a", "/s/s/s/s/s/s", "/W/J0"]
+
+# From the same files, and real.
+STILL_PATHS = [
+    "/dev/tty", "/bin/sh", "/etc/ssl/cert.pem", "/go/src/github.com/docker/cli/cli/cobra.go",
+    "/usr/local/go/src/bufio/bufio.go", "/.well-known/attribution-reporting/", "/home/user/go/",
+    "/cmd/vendor/golang.org/x/mod/internal/lazyregexp", "/lib/z",
+]
+
+
+@pytest.mark.parametrize("text", NOT_PATHS)
+def test_a_path_of_one_and_two_character_segments_is_debris(text):
+    assert strings.classify([text]).paths == []
+
+
+@pytest.mark.parametrize("text", STILL_PATHS)
+def test_a_path_that_names_a_directory_still_is_one(text):
+    """`/go/src/...` opens with two letters and is Docker's GOPATH on the build
+    machine: the rule asks for one segment of three characters anywhere, not for
+    the first to have them."""
+    assert strings.classify([text]).paths == [text]

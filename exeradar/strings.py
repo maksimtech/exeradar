@@ -79,6 +79,9 @@ _FILE_EXTENSIONS = frozenset({
     "bat", "cmd", "ps1", "vbs", "js", "py", "pyc", "pyd", "h", "c", "cpp",
     "lib", "obj", "pdb", "res", "rc", "manifest", "bin", "db", "bak",
     "png", "jpg", "gif", "ico", "bmp", "wav", "avi", "mp3", "zip", "gz",
+    # Catalonia's TLD, and the extension of the catalog files path B of the
+    # signature check reads: wireguard.exe names its drivers' `WIREGUARD.CAT`.
+    "cat",
 })
 
 
@@ -404,11 +407,20 @@ def _is_host(text: str) -> bool:
     The suffix must also not be a file extension — `com` is a TLD and was never
     listed, but `dll` is what separates example.com from kernel32.dll.
 
-    And some label before the suffix must be at least two characters: `g.iG`
-    came out of the certificate bytes of the test fixture, and a one-character
-    label with a two-character suffix is noise far more often than it is a
-    host. That costs the rare real `x.co`, which is the cheaper of the two
-    errors.
+    And some label before the suffix must be at least three characters: `g.iG`
+    came out of the certificate bytes of the test fixture, and the Go binaries
+    measured on 2026-10-09 — docker.exe, go.exe, wireguard.exe — produced the
+    two-character form by the dozen: `0y.nf`, `6J.vA`, `LG.HK`, four random
+    printable bytes and a dot, each with a country code on the end. That costs
+    the rare real `t.co`, which is the cheaper of the two errors; `aka.ms` has
+    its three.
+
+    Two more, from the same day. A label written in both cases is an
+    identifier: DNS is case-insensitive and a program has no reason to write
+    `System.Net.Ping`, `bytes.Compare` or `StreamReader.read` as a hostname,
+    while a .NET namespace, a Go symbol and a Python attribute are written in
+    nothing else — and `.net`, `.compare` and `.read` are all delegated. `DNS.SB`
+    and `WWW.EXAMPLE.COM` are one case throughout and come through.
     """
     match = _HOST.match(text)
     if not match:
@@ -418,5 +430,12 @@ def _is_host(text: str) -> bool:
         return False
     if suffix not in TLDS:
         return False
-    labels = text.split(".")[:-1]
-    return any(len(label) >= 2 for label in labels)
+    labels = text.split(".")
+    if any(_mixed_case(label) for label in labels):
+        return False
+    return any(len(label) >= 3 for label in labels[:-1])
+
+
+def _mixed_case(label: str) -> bool:
+    """Whether one label carries both an upper- and a lower-case letter."""
+    return any(ch.isupper() for ch in label) and any(ch.islower() for ch in label)
