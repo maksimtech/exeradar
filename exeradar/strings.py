@@ -150,8 +150,11 @@ def classify(candidates: Iterable[str]) -> Strings:
     candidates = list(candidates)
     declared_versions = _versions_declared_in(candidates)
     # One check for the whole file, not one per quad: whether it carries an
-    # object identifier table at all is what makes the arc rule applicable.
-    has_oids = _carries_oids(candidates)
+    # object identifier table at all is what makes the arc rule applicable. Made
+    # only when a quad under an arc turns up: on a file with none — most of them
+    # — it is a pass over every string that decides nothing, and CodSpeed
+    # measured it at 11% of classify() on the path-heavy corpus.
+    has_oids: bool | None = None
 
     urls: set[str] = set()
     ips: set[str] = set()
@@ -168,8 +171,14 @@ def classify(candidates: Iterable[str]) -> Strings:
             urls.update(found_urls)
             continue
         if _is_ipv4(text):
-            if text not in declared_versions and not (has_oids and _under_an_oid_arc(text)):
-                ips.add(text)
+            if text in declared_versions:
+                continue
+            if _under_an_oid_arc(text):
+                if has_oids is None:
+                    has_oids = _carries_oids(candidates)
+                if has_oids:
+                    continue
+            ips.add(text)
             continue
         if _WINDOWS_PATH.match(text) or _is_unix_path(text):
             paths.add(text)
@@ -360,7 +369,9 @@ def _carries_oids(candidates: list[str]) -> bool:
     """Whether the file writes object identifiers as text at all."""
     for text in candidates:
         text = text.strip()
-        if not _UNMISTAKABLE_OID.match(text):
+        # The first character before the pattern: an OID starts with 0, 1 or 2,
+        # and almost nothing else in a binary does, so the regex runs on few.
+        if text[:1] not in "012" or not _UNMISTAKABLE_OID.match(text):
             continue
         arcs = text.split(".")
         if len(arcs) >= 5 or any(int(arc) > 255 for arc in arcs):
@@ -402,9 +413,12 @@ def _is_unix_path(text: str) -> bool:
     machine that built Docker, and the other 2,207 paths of docker.exe are
     source files under it and under /usr/local/go, every one of them real.
     """
-    if not _UNIX_PATH.match(text):
-        return False
-    return any(len(segment) >= 3 for segment in text.split("/"))
+    return bool(_UNIX_PATH.match(text) and _UNIX_DIRECTORY.search(text))
+
+
+# A segment of three characters, found by the engine rather than by splitting
+# the string and measuring every piece in Python.
+_UNIX_DIRECTORY = re.compile(r"/[^/]{3}")
 
 
 def _is_host(text: str) -> bool:
