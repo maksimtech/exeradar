@@ -393,11 +393,14 @@ def _is_ipv4(text: str) -> bool:
 def _is_unix_path(text: str) -> bool:
     """An absolute path, and not four bytes with slashes in them.
 
-    The minimum string length is four, and `/o/O` is four printable bytes:
-    docker.exe gave 2,218 paths on 2026-10-09 and 1,390 of them were `/1/4`,
-    `/./u`, `/-/S/k/`. A path names a directory somewhere along it, so one
-    segment of three characters is asked for — anywhere, not first: `/go/src/
-    github.com/docker/...` is the GOPATH of the machine that built it.
+    The minimum string length is four, and `/o/O` is four printable bytes.
+    Measured on 2026-10-09: eleven of docker.exe's 2,218 paths were `/1/4`,
+    `/./u`, `/o/O`; sixteen of node.exe's 250 were `/-/S/k/`, `/s/s/s/s/s/s`;
+    thirty-two of Code.exe's 87 were `/R/R`, `/u/M`. A path names a directory
+    somewhere along it, so one segment of three characters is asked for —
+    anywhere, not first: `/go/src/github.com/docker/...` is the GOPATH of the
+    machine that built Docker, and the other 2,207 paths of docker.exe are
+    source files under it and under /usr/local/go, every one of them real.
     """
     if not _UNIX_PATH.match(text):
         return False

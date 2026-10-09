@@ -78,11 +78,13 @@ no version in this file has ever matched — 40 is not a month, and
   characters, where it needed two (`t.co` joins `x.co` as the cost). `.cat` is a
   Windows catalog before it is Catalonia: `WIREGUARD.CAT` is a file.
 
-- **A path names a directory somewhere along it.** `docker.exe` reported 2,218 paths
-  and 1,390 were `/1/4`, `/./u`, `/-/S/k/`: four printable bytes with slashes in
-  them, which is what the minimum string length lets through. A Unix path now needs
-  one segment of three characters, anywhere — `/go/src/github.com/docker/cli/…`,
-  Docker's GOPATH, opens with two and stays.
+- **A path names a directory somewhere along it.** `/1/4`, `/./u`, `/o/O`, `/-/S/k/`,
+  `/s/s/s/s/s/s` were reported as paths — four printable bytes with slashes in them,
+  which is what the minimum string length lets through: eleven of `docker.exe`'s
+  2,218, sixteen of `node.exe`'s 250, thirty-two of `Code.exe`'s 87. A Unix path now
+  needs one segment of three characters, anywhere — `/go/src/github.com/docker/cli/…`,
+  Docker's GOPATH, opens with two and stays, as do the other 2,207 source paths of
+  docker.exe, every one of them real.
 
 - **The import column is as wide as the longest name shown.** It was 34 characters,
   and `api-ms-win-core-libraryloader-l1-2-0.dll` is 40: on `notepad.exe`, `cmd.exe` and
