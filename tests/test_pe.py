@@ -280,3 +280,81 @@ def test_an_ordinal_claims_no_category():
     the number: there is no name to read a verb from."""
     assert pe.categorise("OLEAUT32.dll", ["#15", "#2"]) == frozenset()
     assert pe.categorise("WS2_32.dll", ["#23"]) == frozenset({"network"})
+
+
+# --------------------------------------------------------------------------
+# section names longer than eight bytes
+# --------------------------------------------------------------------------
+
+# python.exe's .reloc has 48 virtual bytes in a 512-byte raw block, so from 256
+# bytes in it is zero padding inside a section: a place to put a COFF string
+# table that LIEF will read and nothing else will miss. The same padding
+# conftest's pe_with_a_string uses.
+_RELOC_PADDING = 0x16600 + 256
+
+
+@pytest.fixture
+def pe_with_a_long_section_name(tmp_path) -> Path:
+    """python.exe whose last section is called `.debug_gdb_scripts`.
+
+    A COFF section header holds eight bytes for the name. A longer one is kept
+    in the string table after the symbol table, and the header carries `/N`,
+    the decimal offset of the name in that table — the convention of the PE/COFF
+    specification, which Go's linker uses for every `.zdebug_*` section.
+    """
+    import struct
+
+    sample = FIXTURES / "python.exe"
+    if not sample.is_file():
+        pytest.skip("tests/fixtures/python.exe is missing")
+    data = bytearray(sample.read_bytes())
+
+    name = b".debug_gdb_scripts\x00"
+    struct.pack_into("<I", data, _RELOC_PADDING, 4 + len(name))      # the table's size, itself included
+    data[_RELOC_PADDING + 4:_RELOC_PADDING + 4 + len(name)] = name
+
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    coff = e_lfanew + 4
+    struct.pack_into("<I", data, coff + 8, _RELOC_PADDING)             # PointerToSymbolTable, 0 symbols
+    count = struct.unpack_from("<H", data, coff + 2)[0]
+    optional = struct.unpack_from("<H", data, coff + 16)[0]
+    last = coff + 20 + optional + 40 * (count - 1)
+    data[last:last + 8] = b"/4".ljust(8, b"\x00")                      # offset 4: just past the size
+
+    target = tmp_path / "long-names.exe"
+    target.write_bytes(bytes(data))
+    return target
+
+
+def test_a_long_section_name_is_read_from_the_string_table(pe_with_a_long_section_name):
+    """docker.exe (Docker Inc, 44 MB, Go) showed eight sections called `/4`,
+    `/19`, `/32`, `/46`, `/65`, `/78`, `/95`, `/112`, five of them at entropy
+    8.00 and coloured as packed. They are `.zdebug_abbrev`, `.zdebug_line`,
+    `.zdebug_frame`, `.debug_gdb_scripts`, `.zdebug_info` and so on: compressed
+    DWARF, which is what entropy 8.00 means once the name is readable."""
+    result = pe.PEParser(pe_with_a_long_section_name).parse(
+        ExeResult(path=str(pe_with_a_long_section_name), size=0, sha256="")
+    )
+
+    assert [s.name for s in result.sections][-1] == ".debug_gdb_scripts"
+    assert "/4" not in [s.name for s in result.sections]
+
+
+def test_a_slash_name_with_no_table_behind_it_is_kept_as_written(pe_path):
+    """The convention is only an offset; a header saying `/4` in a file with no
+    string table names nothing, and the raw name is the honest answer."""
+    import struct
+
+    data = bytearray(pe_path.read_bytes())
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    coff = e_lfanew + 4
+    count = struct.unpack_from("<H", data, coff + 2)[0]
+    optional = struct.unpack_from("<H", data, coff + 16)[0]
+    last = coff + 20 + optional + 40 * (count - 1)
+    data[last:last + 8] = b"/4".ljust(8, b"\x00")
+    import lief
+
+    binary = lief.PE.parse(bytes(data))
+    names = [pe._section_name(section) for section in binary.sections]
+
+    assert names[-1] == "/4"

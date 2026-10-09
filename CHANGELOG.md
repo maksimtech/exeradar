@@ -44,6 +44,13 @@ no version in this file has ever matched — 40 is not a month, and
   function named `#7`, the way dumpbin writes one; the category rules read nothing
   from it, since a number carries no verb.
 
+- **A section name longer than eight bytes is read from the string table.**
+  `docker.exe` (Go) showed eight sections called `/4`, `/19`, `/32` … `/112`, five of
+  them at entropy 8.00 and coloured as packed. `/N` is the PE/COFF convention for a
+  name kept in the COFF string table at offset N; resolved, they are `.zdebug_info`,
+  `.zdebug_line` and their siblings — compressed DWARF, which is what 8.00 means
+  once the name can be read. A `/N` with no table behind it is kept as written.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

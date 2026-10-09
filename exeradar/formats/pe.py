@@ -103,6 +103,30 @@ def _as_text(name: str | bytes) -> str:
     return name
 
 
+def _section_name(section) -> str:
+    """The section's name, long names included.
+
+    The header holds eight bytes. A longer name lives in the COFF string table
+    and the header says `/N`, the decimal offset of the name in it — the PE/COFF
+    specification's convention, and the one Go's linker uses for every
+    `.zdebug_*` section. docker.exe (Docker Inc, Go, measured 2026-10-09) showed
+    eight sections called `/4`, `/19`, `/32`, `/46`, `/65`, `/78`, `/95`, `/112`,
+    five of them at entropy 8.00 and coloured as packed; readable, they are
+    `.zdebug_info` and its siblings, compressed DWARF, and 8.00 is what that is.
+
+    LIEF resolves the reference when the table is there. When it is not — a
+    header that says `/4` in a file with no string table — the raw name is kept:
+    the convention is only an offset, and an offset into nothing names nothing.
+    """
+    name = _as_text(section.name)
+    if name.startswith("/") and name[1:].isdigit():
+        resolved = getattr(section, "coff_string", None)
+        long_name = getattr(resolved, "string", None) if resolved is not None else None
+        if long_name:
+            return _as_text(long_name)
+    return name
+
+
 def _function_name(entry) -> str:
     """What the import table asks the DLL for: a name, or a number.
 
@@ -243,7 +267,7 @@ class PEParser:
         # reading its value meant the tested function never reached the report.
         result.sections = [
             Section(
-                name=_as_text(section.name),
+                name=_section_name(section),
                 virtual_size=section.virtual_size,
                 raw_size=section.sizeof_raw_data,
                 entropy=entropy(bytes(section.content)),
