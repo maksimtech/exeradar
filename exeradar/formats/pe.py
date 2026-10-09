@@ -103,6 +103,20 @@ def _as_text(name: str | bytes) -> str:
     return name
 
 
+def _function_name(entry) -> str:
+    """What the import table asks the DLL for: a name, or a number.
+
+    A function imported by ordinal has no name, and was dropped: powershell.exe
+    showed `ATL.DLL 0`, and Code.exe showed 29 functions from WS2_32.dll when it
+    asks for 54, 25 of them by number. `#7` is how dumpbin and the linker's map
+    files write an ordinal, so it is readable next to the names; `categorise`
+    reads nothing from it, since there is no verb in a number.
+    """
+    if entry.name:
+        return _as_text(entry.name)
+    return f"#{entry.ordinal}"
+
+
 def parse(path: str | Path) -> lief.PE.Binary | None:
     """LIEF's parser, handed the bytes rather than the name.
 
@@ -239,7 +253,7 @@ class PEParser:
         result.imports = [
             Import(
                 dll=_as_text(imported.name),
-                functions=[_as_text(entry.name) for entry in imported.entries if entry.name],
+                functions=[_function_name(entry) for entry in imported.entries if entry.name or entry.is_ordinal],
             )
             for imported in binary.imports
         ]

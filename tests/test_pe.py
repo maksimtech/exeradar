@@ -15,6 +15,7 @@ They need a real binary and skip when there is none; see conftest.
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import pytest
 
@@ -219,3 +220,63 @@ def test_a_path_that_cannot_be_opened_parses_to_none(tmp_path, make):
     """Python opens the file and LIEF only parses the bytes, so a path Python
     cannot read has to come back as LIEF answered for one: None, not OSError."""
     assert pe.parse(make(tmp_path)) is None
+
+
+# --------------------------------------------------------------------------
+# imports by ordinal — what the real binaries showed on 2026-10-09
+# --------------------------------------------------------------------------
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _import_lookup_entry(data: bytes, dll: str) -> int:
+    """File offset of the first import lookup table entry for `dll`."""
+    import lief
+
+    binary = lief.PE.parse(data)
+    assert binary is not None
+    for imported in binary.imports:
+        if imported.name.lower() == dll:
+            return binary.rva_to_offset(imported.import_lookup_table_rva or imported.import_address_table_rva)
+    raise AssertionError(f"{dll} is not imported")
+
+
+@pytest.fixture
+def pe_importing_by_ordinal(tmp_path) -> Path:
+    """python.exe asking python314.dll for ordinal 7 instead of for `Py_Main`.
+
+    The import lookup table is an array of 64-bit entries; the high bit set
+    means "by ordinal" and the low 16 bits carry the number. Flipping the one
+    entry is the whole change: every other header stays as it was.
+    """
+    import struct
+
+    sample = FIXTURES / "python.exe"
+    if not sample.is_file():
+        pytest.skip("tests/fixtures/python.exe is missing")
+    data = bytearray(sample.read_bytes())
+    struct.pack_into("<Q", data, _import_lookup_entry(bytes(data), "python314.dll"), (1 << 63) | 7)
+    target = tmp_path / "ordinal.exe"
+    target.write_bytes(bytes(data))
+    return target
+
+
+def test_an_import_by_ordinal_is_counted_and_named_by_its_number(pe_importing_by_ordinal):
+    """powershell.exe imports ATL.DLL by ordinal only and was shown importing
+    `0` functions from it; Code.exe asks WS2_32.dll for 54 functions, 25 of
+    them by ordinal, and was shown 29. A function asked for by number is still
+    a function the binary calls, and `#7` is how the linker's own tools name it.
+    """
+    result = pe.PEParser(pe_importing_by_ordinal).parse(
+        ExeResult(path=str(pe_importing_by_ordinal), size=0, sha256="")
+    )
+
+    python = next(imp for imp in result.imports if imp.dll.lower() == "python314.dll")
+    assert python.functions == ["#7"]
+
+
+def test_an_ordinal_claims_no_category():
+    """`#15` from WS2_32.dll says network through the DLL and nothing through
+    the number: there is no name to read a verb from."""
+    assert pe.categorise("OLEAUT32.dll", ["#15", "#2"]) == frozenset()
+    assert pe.categorise("WS2_32.dll", ["#23"]) == frozenset({"network"})

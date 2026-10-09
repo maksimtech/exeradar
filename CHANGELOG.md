@@ -38,6 +38,12 @@ no version in this file has ever matched — 40 is not a month, and
   ticket. The first ten are named and the rest are counted (`…and 181 more`); the
   whole list stays in the JSON under `strings.ips`, where a tool reads it.
 
+- **A function imported by ordinal is counted.** It has no name, and was dropped:
+  `powershell.exe` was shown importing `0` functions from `ATL.DLL`, and `Code.exe`
+  29 from `WS2_32.dll` when it asks for 54, 25 of them by number. An ordinal is now a
+  function named `#7`, the way dumpbin writes one; the category rules read nothing
+  from it, since a number carries no verb.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may
