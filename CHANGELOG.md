@@ -12,6 +12,20 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Fixed
+
+- **An object identifier is not an IP address.** Run on 2026-10-09 against the
+  binaries on a Windows 11 workstation, `gpg.exe` 2.5.24 was reported with four
+  hardcoded addresses — `1.3.101.110` to `1.3.101.113`, RFC 8410's X25519, X448,
+  Ed25519 and Ed448 — and `node.exe` with 189, the whole of OpenSSL's X.520 and X.509
+  object table (`2.5.4.3` is commonName). Both raised `hardcoded_ip` and cited the CRA.
+  A dotted quad under one of the arcs the registries assign at four components
+  (`1.3.6.1`, `1.3.14.3`, `1.3.36`, `1.3.101`, `1.3.132.0`, `2.5`, `2.23`) is now
+  read as an identifier when the same file carries an identifier no address can be —
+  five arcs, or an arc past 255. Corroboration inside the file, as for versions: the
+  arcs are also allocated address blocks, so the arc alone decides nothing, and
+  Cloudflare's `1.1.1.1` beside Chromium's OpenSSL table is still reported.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

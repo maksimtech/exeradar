@@ -146,6 +146,9 @@ def classify(candidates: Iterable[str]) -> Strings:
     # classification pass does, and a generator cannot be read twice.
     candidates = list(candidates)
     declared_versions = _versions_declared_in(candidates)
+    # One check for the whole file, not one per quad: whether it carries an
+    # object identifier table at all is what makes the arc rule applicable.
+    has_oids = _carries_oids(candidates)
 
     urls: set[str] = set()
     ips: set[str] = set()
@@ -162,7 +165,7 @@ def classify(candidates: Iterable[str]) -> Strings:
             urls.update(found_urls)
             continue
         if _is_ipv4(text):
-            if text not in declared_versions:
+            if text not in declared_versions and not (has_oids and _under_an_oid_arc(text)):
                 ips.add(text)
             continue
         if _WINDOWS_PATH.match(text) or _UNIX_PATH.match(text):
@@ -242,6 +245,57 @@ def _versions_declared_in(candidates: list[str]) -> set[str]:
         for text in candidates
         for match in _DECLARED_VERSION.finditer(text)
     }
+
+
+# Object identifiers that are four arcs long and whose arcs all fit in an octet,
+# which is exactly the shape of an address. Not a rule about shape: these are the
+# arcs the ITU-T and ISO registries assign at that depth and that every TLS and
+# PGP library writes into its object table as text —
+#
+#   1.3.6.1      internet (RFC 1155), the root of every private-enterprise arc
+#   1.3.14.3     OIW secsig algorithms (sha1 is 1.3.14.3.2.26)
+#   1.3.36.*     TeleTrusT (1.3.36.3 is its algorithm arc)
+#   1.3.101.*    RFC 8410: 110 X25519, 111 X448, 112 Ed25519, 113 Ed448
+#   1.3.132.0    SECG named curves
+#   2.5.*        X.500 directory: 2.5.4 attribute types, 2.5.6 object classes,
+#                2.5.29 certificate extensions
+#   2.23.*       joint international organisations: 2.23.42 SET, 2.23.133 TCG,
+#                2.23.140 CA/Browser Forum
+#
+# Measured 2026-10-09: gpg.exe 2.5.24 reported RFC 8410's four identifiers as four
+# addresses, and node.exe reported 189 — the whole of OpenSSL's X.520 and X.509
+# tables — and raised `hardcoded_ip` over them, cited against the CRA. 2.5.0.0/16
+# and 1.3.0.0/16 are allocated address blocks all the same, so the arc alone
+# decides nothing: the file has to carry an object identifier table too. That is
+# the same corroboration `_versions_declared_in` asks for, and it is what keeps
+# Cloudflare's 1.1.1.1 and 1.0.0.1 in Code.exe — arcs nobody assigns — reported.
+_OID_FAMILIES = ("1.3.36.", "1.3.101.", "2.5.", "2.23.")
+_OID_EXACT = frozenset({"1.3.6.1", "1.3.14.3", "1.3.132.0"})
+
+# An object identifier no address can be: five arcs or more, or an arc past 255.
+# The first arc is 0, 1 or 2 by the standard, which is what refuses `3.4.5.6.7`.
+_UNMISTAKABLE_OID = re.compile(r"^[0-2](?:\.\d+){2,}$")
+
+
+def _carries_oids(candidates: list[str]) -> bool:
+    """Whether the file writes object identifiers as text at all."""
+    for text in candidates:
+        text = text.strip()
+        if not _UNMISTAKABLE_OID.match(text):
+            continue
+        arcs = text.split(".")
+        if len(arcs) >= 5 or any(int(arc) > 255 for arc in arcs):
+            return True
+    return False
+
+
+def _under_an_oid_arc(quad: str) -> bool:
+    """Whether a dotted quad sits under one of the registered arcs above.
+
+    The three exact ones are four arcs themselves: `1.3.6.10` is not under
+    `1.3.6.1`, and a prefix test would have said it was.
+    """
+    return quad in _OID_EXACT or quad.startswith(_OID_FAMILIES)
 
 
 def _is_ipv4(text: str) -> bool:

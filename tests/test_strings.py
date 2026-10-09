@@ -412,3 +412,72 @@ def test_the_cost_of_the_rule_is_written_down():
     found = strings.classify(["8.8.8.8", "ProductVersion=8.8.8.8"])
 
     assert found.ips == []
+
+
+# --------------------------------------------------------------------------
+# a dotted quad that is an object identifier
+# --------------------------------------------------------------------------
+
+# Read out of C:\Program Files\GnuPG\bin\gpg.exe (2.5.24, 2026-10-09), one
+# NUL-separated run after another at offset 0x13C9BD: the curve table of its ECC
+# code. The four quads are RFC 8410's algorithm identifiers — X25519, X448,
+# Ed25519, Ed448 — and were reported as four IP addresses, raised as
+# `hardcoded_ip` and cited against the CRA.
+GPG_CURVE_TABLE = [
+    "1.3.6.1.4.1.11591.2.12242973", "1.3.101.110", "(public-key(ecc(curve %s)))",
+    "ed25519", "ietf25", "1.3.6.1.4.1.11591.15.25", "1.3.101.112", "X448",
+    "1.3.101.111", "cv448", "Ed448", "1.3.101.113", "ed448", "NIST P-256",
+    "1.2.840.10045.3.1.7", "nistp256",
+]
+
+# node.exe v24 (OpenJS Foundation, 2026-03-31): OpenSSL's object table, where
+# the X.520 attribute types and X.509 extensions sit beside the longer arcs.
+# 189 of the 191 "addresses" reported for the file came from here.
+NODE_OBJECT_TABLE = [
+    "1.2.410.200004.3", "1.3.6.1.5.5.7.4.3", "1.2.840.113556.4.3", "1.2.840.10045.4.3",
+    "2.5.4.3", "0.4.0.127.0.7.3.1.5.4.3", "1.2.840.113549.1.7.3", "0.2.262.1.10.7.3",
+    "1.3.36.3", "1.3.36.8.6.3", "2.5.29.15", "2.23.42.0", "2.5.6.4",
+]
+
+
+def test_the_curve_table_of_gpg_is_not_four_addresses():
+    assert strings.classify(GPG_CURVE_TABLE).ips == []
+
+
+def test_the_object_table_of_openssl_is_not_a_list_of_addresses():
+    assert strings.classify(NODE_OBJECT_TABLE).ips == []
+
+
+def test_an_address_beside_an_oid_table_is_still_an_address():
+    """Code.exe carries OpenSSL's objects and Chromium's DNS-over-HTTPS table in
+    the same file: `Cloudflare`, `1.1.1.1`, `1.0.0.1` sit a few bytes apart.
+    1.1 and 1.0 are not arcs any registry assigns at four components, so the
+    resolvers stay addresses whatever else the file carries."""
+    found = strings.classify([*NODE_OBJECT_TABLE, "Cloudflare", "1.1.1.1", "1.0.0.1", "8.8.8.8"])
+
+    assert found.ips == ["1.0.0.1", "1.1.1.1", "8.8.8.8"]
+
+
+def test_a_registered_arc_alone_is_still_reported():
+    """Corroboration, as with the versions: `2.5.4.3` is commonName in X.520,
+    and in a file that carries no other object identifier it is also a valid
+    address in Orange's 2.5.0.0/16. Nothing in the file says which, so it is
+    reported, and the note on the finding says to check it."""
+    assert strings.classify(["2.5.4.3"]).ips == ["2.5.4.3"]
+    assert strings.classify(["1.3.101.110"]).ips == ["1.3.101.110"]
+
+
+def test_what_counts_as_an_object_identifier_table():
+    """Five arcs, or any arc past 255: a dotted sequence an address cannot be."""
+    assert strings._carries_oids(["1.2.840.113549.1.1.1"])
+    assert strings._carries_oids(["1.3.132.0.35"])
+    assert strings._carries_oids(["2.16.840.1"])
+    assert not strings._carries_oids(["2.5.4.3", "10.0.0.1", "1.2.3"])
+    assert not strings._carries_oids(["3.4.5.6.7"])     # the first arc is 0, 1 or 2
+
+
+def test_the_exact_arcs_are_not_prefixes():
+    """`1.3.6.1` is the internet arc; `1.3.6.10` is an address in APNIC's block."""
+    found = strings.classify(["1.2.840.113549.1.1.1", "1.3.6.1", "1.3.6.10", "1.3.14.3", "1.3.14.30"])
+
+    assert found.ips == ["1.3.14.30", "1.3.6.10"]
