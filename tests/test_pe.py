@@ -22,6 +22,8 @@ import pytest
 from exeradar.formats import pe
 from exeradar.models import ExeResult
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
 # --------------------------------------------------------------------------
 # the categoriser — no binary needed, runs everywhere
 # --------------------------------------------------------------------------
@@ -181,20 +183,51 @@ def test_sections_are_reported_with_entropy(pe_path):
         assert section.virtual_size >= 0
 
 
-def test_section_entropy_comes_from_the_tested_function(pe_path, monkeypatch):
-    """The report kept printing -0.00 after entropy() had been fixed.
+def test_section_entropy_is_not_recomputed_byte_by_byte_in_python(pe_path, monkeypatch):
+    """Code.exe (VS Code, 238 MB) took 24 s to analyse on 2026-10-09, and six of
+    those were `Counter()` walking the 186 MB of its .text one byte at a time
+    for a number LIEF had already computed in C++ in 70 ms. The parser reads
+    LIEF's figure; `entropy()` stays as the reference the next test holds it
+    to, and as what the benchmarks and the property tests exercise."""
+    monkeypatch.setattr(pe, "entropy", lambda data: pytest.fail("a section went through Python byte by byte"))
 
-    PEParser was reading LIEF's own `section.entropy`, which is computed the
-    textbook way and returns -0.0 just the same, so the function the tests
-    cover never reached the report: the fix passed its unit test and changed
-    nothing a user sees. Only rerunning the tool on BIOSdump2license.exe showed
-    it. This pins the wiring, which together with the sign test above is what
-    actually keeps "-0.00" out of the output.
-    """
-    monkeypatch.setattr(pe, "entropy", lambda data: 1.25)
     result = pe.PEParser(pe_path).parse(ExeResult(path=str(pe_path), size=0, sha256=""))
+
     assert result.sections
-    assert all(section.entropy == 1.25 for section in result.sections)
+
+
+def test_section_entropy_agrees_with_the_tested_function(pe_path):
+    """Same formula, two implementations: the one the report prints has to be
+    the one the tests cover, to the precision a float carries."""
+    import lief
+
+    binary = lief.PE.parse(str(pe_path))
+    result = pe.PEParser(pe_path).parse(ExeResult(path=str(pe_path), size=0, sha256=""))
+
+    for section, reported in zip(binary.sections, result.sections, strict=True):
+        assert reported.entropy == pytest.approx(pe.entropy(bytes(section.content)), abs=1e-9)
+
+
+def test_a_section_of_one_repeated_byte_is_reported_as_positive_zero(tmp_path):
+    """The report kept printing -0.00 after entropy() had been fixed, because
+    LIEF computes the textbook way and returns -0.0 for one repeated byte, and
+    PEParser was reading LIEF. It reads LIEF again, so the sign is put right on
+    the way through — and this is the test that keeps "-0.00" out of the
+    output, on a real section rather than on bytes handed to a function."""
+    sample = FIXTURES / "python.exe"
+    if not sample.is_file():
+        pytest.skip("tests/fixtures/python.exe is missing")
+    data = bytearray(sample.read_bytes())
+    data[9216:9216 + 512] = b"\x00" * 512          # .data: 512 raw bytes at offset 9216
+    target = tmp_path / "uniform.exe"
+    target.write_bytes(bytes(data))
+
+    result = pe.PEParser(target).parse(ExeResult(path=str(target), size=0, sha256=""))
+
+    uniform = next(section for section in result.sections if section.name == ".data")
+    assert uniform.entropy == 0.0
+    assert math.copysign(1.0, uniform.entropy) == 1.0
+    assert f"{uniform.entropy:.2f}" == "0.00"
 
 
 def test_imports_keep_their_function_names(pe_path):
@@ -225,8 +258,6 @@ def test_a_path_that_cannot_be_opened_parses_to_none(tmp_path, make):
 # --------------------------------------------------------------------------
 # imports by ordinal — what the real binaries showed on 2026-10-09
 # --------------------------------------------------------------------------
-
-FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _import_lookup_entry(data: bytes, dll: str) -> int:

@@ -51,6 +51,13 @@ no version in this file has ever matched — 40 is not a month, and
   `.zdebug_line` and their siblings — compressed DWARF, which is what 8.00 means
   once the name can be read. A `/N` with no table behind it is kept as written.
 
+- **Section entropy is read from LIEF, not recomputed byte by byte.** `Code.exe`
+  (VS Code, 238 MB) took 24 s to analyse; six of them were `Counter()` walking the
+  186 MB of its `.text` for a number LIEF had computed in 70 ms. The parser reads
+  LIEF's figure and puts its sign right (`-0.0` for a section of one repeated byte
+  is what the old wiring existed to avoid); `entropy()` stays as the reference the
+  tests hold it to. 14 s on the same file.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

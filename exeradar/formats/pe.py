@@ -212,6 +212,16 @@ def entropy(data: bytes) -> float:
     )
 
 
+def _positive(value: float) -> float:
+    """LIEF's entropy as the report may print it: never -0.0.
+
+    The textbook form negates a sum, and for one repeated byte that sum is
+    1 · log2(1) = 0.0 — negated, -0.0, which formats as "-0.00". IEEE 754 has
+    -0.0 + 0.0 == +0.0, and every other value is unchanged.
+    """
+    return float(value) + 0.0
+
+
 def categorise(dll: str, functions: Iterable[str] = ()) -> frozenset[str]:
     """What a DLL and the functions called from it say about the binary.
 
@@ -262,15 +272,19 @@ class PEParser:
         result.format = "PE"
         result.arch = str(header.machine).rsplit(".", 1)[-1]
         result.built = self._built(header.time_date_stamps)
-        # Our entropy(), not LIEF's section.entropy: LIEF computes it the
-        # textbook way and returns -0.0 for a section of one repeated byte, and
-        # reading its value meant the tested function never reached the report.
+        # LIEF's section.entropy, with its sign put right. It was `entropy()`
+        # over `bytes(section.content)`, so that the tested function reached the
+        # report — and on Code.exe (VS Code, 238 MB) that was six seconds of
+        # Counter() walking the 186 MB of .text one byte at a time, for a number
+        # LIEF had computed in 70 ms. The two agree to the last digit, which
+        # test_pe holds them to; what LIEF gets wrong is the sign of nothing,
+        # and `_positive` is what puts it right.
         result.sections = [
             Section(
                 name=_section_name(section),
                 virtual_size=section.virtual_size,
                 raw_size=section.sizeof_raw_data,
-                entropy=entropy(bytes(section.content)),
+                entropy=_positive(section.entropy),
             )
             for section in binary.sections
         ]
