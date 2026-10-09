@@ -25,7 +25,7 @@ from rich.table import Table
 
 from exeradar import libraries
 from exeradar.formats import pe
-from exeradar.models import ExeResult, Signature
+from exeradar.models import ExeResult, Signature, Version
 from exeradar.tlp import Label, banner
 
 if TYPE_CHECKING:
@@ -183,6 +183,7 @@ def to_markdown(result: ExeResult, tlp_label: Label | None = None,
             if result.overlay else []
         ),
         f"- **SHA-256:** `{result.sha256}`",
+        f"- **Version:** {_inert(version_sentence(result.version))}",
         f"- **Built:** {result.built or 'not stated'}",
         "",
         "## Signature",
@@ -333,6 +334,7 @@ def to_console(result: ExeResult, console: Console | None = None,
         f"built {result.built or 'not stated'}"
     )
     console.print(f"  sha256 [dim]{result.sha256}[/dim]")
+    console.print(f"  version {escape(version_sentence(result.version))}")
     if result.overlay:
         # Said rather than skipped quietly. On a self-extracting installer this
         # is most of the file, and a reader who does not know it was left out
@@ -504,6 +506,30 @@ def write_many(results: Sequence[ExeResult], path: str | Path,
             else to_markdown_many(results, tlp_label))
     Path(path).write_text(text + "\n", encoding="utf-8")
     return chosen
+
+
+def version_sentence(version: Version | None) -> str:
+    """What the file says it is, in one line: `4.9.9.2, product 5`.
+
+    The fixed number leads, since it is what Explorer shows as "File version".
+    The text the manufacturer wrote follows only where it says something else
+    — python.exe's `3.14.7150.1013, written as 3.14.7` — and the product version
+    only where it differs from both, as Dev-C++'s `5` does. Nothing is repeated,
+    and "not stated" is the answer for a file without the resource, as it is
+    for a build date.
+    """
+    if version is None:
+        return "not stated"
+    file = version.file or version.file_string
+    if file is None:
+        return "not stated"
+    parts = [file]
+    if version.file_string and version.file_string != file:
+        parts.append(f"written as {version.file_string}")
+    product = version.product_string or version.product
+    if product and product not in (file, version.file_string):
+        parts.append(f"product {product}")
+    return ", ".join(parts)
 
 
 def signature_sentence(signature: Signature) -> str:

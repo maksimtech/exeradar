@@ -389,3 +389,44 @@ def test_a_slash_name_with_no_table_behind_it_is_kept_as_written(pe_path):
     names = [pe._section_name(section) for section in binary.sections]
 
     assert names[-1] == "/4"
+
+
+# --------------------------------------------------------------------------
+# the version the resource declares
+# --------------------------------------------------------------------------
+
+
+def test_the_versioninfo_resource_is_read():
+    """python.exe's VS_FIXEDFILEINFO says 3.14.7150.1013 for both the file and
+    the product; its StringFileInfo says `3.14.7` for both. Read with LIEF on
+    2026-10-09; the fixed words are 0x0003000E and 0x1BEE03F5."""
+    sample = FIXTURES / "python.exe"
+    if not sample.is_file():
+        pytest.skip("tests/fixtures/python.exe is missing")
+
+    result = pe.PEParser(sample).parse(ExeResult(path=str(sample), size=0, sha256=""))
+
+    assert result.version is not None
+    assert result.version.file == "3.14.7150.1013"
+    assert result.version.product == "3.14.7150.1013"
+    assert result.version.file_string == "3.14.7"
+    assert result.version.product_string == "3.14.7"
+
+
+def test_a_file_without_a_version_resource_states_none(pe_path, tmp_path):
+    """The resource directory entry zeroed: LIEF finds no resources, and the
+    answer is None rather than a version made of zeros."""
+    import struct
+
+    data = bytearray(pe_path.read_bytes())
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    magic = struct.unpack_from("<H", data, e_lfanew + 24)[0]
+    fixed = 112 if magic == 0x20B else 96
+    struct.pack_into("<II", data, e_lfanew + 24 + fixed + 2 * 8, 0, 0)   # directory 2: resources
+    target = tmp_path / "no-resources.exe"
+    target.write_bytes(bytes(data))
+
+    result = pe.PEParser(target).parse(ExeResult(path=str(target), size=0, sha256=""))
+
+    assert result.error is None
+    assert result.version is None

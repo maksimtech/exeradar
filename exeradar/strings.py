@@ -139,16 +139,24 @@ def _outside(data: bytes, exclude: Iterable[tuple[int, int]]) -> list[bytes]:
     return chunks
 
 
-def classify(candidates: Iterable[str]) -> Strings:
+def classify(candidates: Iterable[str], versions: Iterable[str] = ()) -> Strings:
     """Sort strings into the four buckets, claiming nothing that is doubtful.
 
     Each string lands in at most one bucket: a URL is not also reported as the
     host inside it, because one string making two claims reads as two findings.
+
+    `versions` is what the file declares about itself outside its strings — the
+    VERSIONINFO resource, as the PE parser read it. A dotted quad equal to one of
+    them is the file's version and not an address: devcpp.exe (Dev-C++ 4.9.9.2,
+    measured 2026-10-09) carries `4.9.9.2` as a string on its own, the
+    StringFileInfo value with alignment padding between it and the `FileVersion`
+    key, so the `Version=` corroboration below never saw the two together and
+    the file was reported with a hardcoded address that is its own version.
     """
     # Materialised: the version pass reads every candidate before the
     # classification pass does, and a generator cannot be read twice.
     candidates = list(candidates)
-    declared_versions = _versions_declared_in(candidates)
+    declared_versions = _versions_declared_in(candidates) | {v.strip() for v in versions}
     # One check for the whole file, not one per quad: whether it carries an
     # object identifier table at all is what makes the arc rule applicable. Made
     # only when a quad under an arc turns up: on a file with none — most of them

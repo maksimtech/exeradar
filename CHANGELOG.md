@@ -14,6 +14,19 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **The file's own version is not an address.** `C:\Dev-Cpp\devcpp.exe` (Dev-C++
+  4.9.9.2, Delphi, UPX-packed, unsigned, measured 2026-10-09) was reported with
+  `hardcoded_ip: 4.9.9.2` and cited against the CRA. `4.9.9.2` is what its
+  VERSIONINFO resource declares, twice: as the fixed numbers of VS_FIXEDFILEINFO and
+  as the StringFileInfo value under `FileVersion` — and that value is the very string
+  the strings pass reads, standing a few padding bytes away from the key that names
+  it, so the `Version=` corroboration never saw the pair. The PE parser now reads the
+  resource into the result (`version`, printed as `version 4.9.9.2, product 5` and
+  carried in the JSON), and a dotted quad equal to anything it declares is the
+  version, not an address: no finding, no citation. Only what the resource says —
+  ICU's `78.2.0.0` in node.exe is a third party's version the file never names as
+  one, and it is still reported.
+
 - **An object identifier is not an IP address.** Run on 2026-10-09 against the
   binaries on a Windows 11 workstation, `gpg.exe` 2.5.24 was reported with four
   hardcoded addresses — `1.3.101.110` to `1.3.101.113`, RFC 8410's X25519, X448,

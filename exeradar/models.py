@@ -100,6 +100,28 @@ class Library:
 
 
 @dataclass
+class Version:
+    """What the VERSIONINFO resource says the file is.
+
+    `file` and `product` are the fixed numbers of VS_FIXEDFILEINFO, written as
+    Explorer writes them — `4.9.9.2` — and they are what an installer compares.
+    `file_string` and `product_string` are the StringFileInfo values under the
+    keys FileVersion and ProductVersion: text the manufacturer typed, which is
+    `4.9.9.2` and `5` in Dev-C++ and `3.14.7` twice in python.exe. None wherever
+    the resource says nothing.
+    """
+
+    file: str | None = None
+    product: str | None = None
+    file_string: str | None = None
+    product_string: str | None = None
+
+    def stated(self) -> list[str]:
+        """Every form the resource states, for whoever has to recognise one."""
+        return [v for v in (self.file, self.product, self.file_string, self.product_string) if v]
+
+
+@dataclass
 class Strings:
     urls: list[str] = field(default_factory=list)
     ips: list[str] = field(default_factory=list)
@@ -128,6 +150,10 @@ class ExeResult:
     format: str | None = None
     arch: str | None = None
     built: str | None = None
+    # What the file says it is, from its VERSIONINFO resource; None when it says
+    # nothing. A fact for the report, and the one thing that tells `4.9.9.2` the
+    # version from `4.9.9.2` the address.
+    version: Version | None = None
     sections: list[Section] = field(default_factory=list)
     imports: list[Import] = field(default_factory=list)
     strings: Strings = field(default_factory=Strings)

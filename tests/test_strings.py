@@ -631,3 +631,28 @@ def test_a_path_that_names_a_directory_still_is_one(text):
     machine: the rule asks for one segment of three characters anywhere, not for
     the first to have them."""
     assert strings.classify([text]).paths == [text]
+
+
+# --------------------------------------------------------------------------
+# a dotted quad the VERSIONINFO resource declares
+# --------------------------------------------------------------------------
+
+
+def test_the_version_the_resource_declares_is_not_an_address():
+    """devcpp.exe carries `4.9.9.2` as a string on its own: the StringFileInfo
+    value, whose key `FileVersion` is a separate string with padding between.
+    VERSIONINFO has already said what it is, so the caller hands that in."""
+    found = strings.classify(["4.9.9.2", "203.0.113.42"], versions=["4.9.9.2"])
+
+    assert found.ips == ["203.0.113.42"]
+
+
+def test_a_declared_version_that_is_not_a_quad_changes_nothing():
+    """python.exe states `3.14.7`; nothing of that shape was ever an address."""
+    found = strings.classify(["10.0.0.1"], versions=["3.14.7", "3.14.7150.1013"])
+
+    assert found.ips == ["10.0.0.1"]
+
+
+def test_without_a_declaration_the_quad_is_still_reported():
+    assert strings.classify(["4.9.9.2"]).ips == ["4.9.9.2"]

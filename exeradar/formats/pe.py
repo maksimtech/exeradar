@@ -16,7 +16,7 @@ from pathlib import Path
 
 import lief
 
-from exeradar.models import ExeResult, Import, Section
+from exeradar.models import ExeResult, Import, Section, Version
 
 CATEGORIES = ("network", "crypto", "process", "registry")
 
@@ -139,6 +139,67 @@ def _function_name(entry) -> str:
     if entry.name:
         return _as_text(entry.name)
     return f"#{entry.ordinal}"
+
+
+def _dotted(ms: int, ls: int) -> str | None:
+    """Two dwords of VS_FIXEDFILEINFO as the four numbers Explorer shows.
+
+    Each dword holds two 16-bit words, major.minor and build.revision. A block
+    of zeros declares nothing, and None says so rather than `0.0.0.0`.
+    """
+    if not ms and not ls:
+        return None
+    return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+
+
+def _string_entry(table, key: str) -> str | None:
+    """One StringFileInfo value, or None when absent or blank: devcpp.exe
+    writes `LegalTrademarks` as an empty string, and an empty version is none."""
+    if table is None:
+        return None
+    value = table.get(key)
+    return value.strip() or None if value else None
+
+
+def version_of(binary: lief.PE.Binary) -> Version | None:
+    """What the VERSIONINFO resource declares, or None when it declares nothing.
+
+    Both halves of the resource are read, because they answer differently.
+    The fixed block is what Explorer shows as "File version" and what an
+    installer compares. The StringFileInfo values are the text the manufacturer
+    typed — and that text is the very UTF-16 string the strings pass extracts
+    from `.rsrc`: devcpp.exe's `4.9.9.2` on its own is its FileVersion value,
+    standing a few padding bytes away from the key that names it. The first
+    string table is the one read; a file with several language blocks states
+    the same version in each.
+
+    The resource tree is the part of a PE a packer rewrites, and LIEF raises on
+    one it cannot walk. Any failure is the same answer as no resource at all.
+    """
+    try:
+        if not binary.has_resources:
+            return None
+        # Typed as a manager or a LIEF error code, and the error is a value here
+        # rather than an exception.
+        manager = binary.resources_manager
+        if not isinstance(manager, lief.PE.ResourcesManager) or not manager.has_version:
+            return None
+        entries = list(manager.version)
+    except Exception:  # noqa: BLE001 - an unreadable resource declares nothing
+        return None
+    for entry in entries:
+        info = entry.file_info
+        strings = entry.string_file_info
+        table = next(iter(strings.children), None) if strings is not None else None
+        version = Version(
+            file=_dotted(info.file_version_ms, info.file_version_ls) if info is not None else None,
+            product=_dotted(info.product_version_ms, info.product_version_ls) if info is not None else None,
+            file_string=_string_entry(table, "FileVersion"),
+            product_string=_string_entry(table, "ProductVersion"),
+        )
+        if version.stated():
+            return version
+    return None
 
 
 def parse(path: str | Path) -> lief.PE.Binary | None:
@@ -272,6 +333,7 @@ class PEParser:
         result.format = "PE"
         result.arch = str(header.machine).rsplit(".", 1)[-1]
         result.built = self._built(header.time_date_stamps)
+        result.version = version_of(binary)
         # LIEF's section.entropy, with its sign put right. It was `entropy()`
         # over `bytes(section.content)`, so that the tested function reached the
         # report — and on Code.exe (VS Code, 238 MB) that was six seconds of
