@@ -30,6 +30,7 @@ not what these tests read.
 from __future__ import annotations
 
 import json
+import os
 import struct
 from dataclasses import replace
 from pathlib import Path
@@ -49,7 +50,11 @@ _FIXED_FILE_INFO_SIGNATURE = struct.pack("<I", 0xFEEF04BD)
 DECLARED = "4.9.9.2"
 TEST_NET_3 = "203.0.113.42"
 
-DEVCPP = Path(r"C:\Dev-Cpp\devcpp.exe")
+# The file that was measured, wherever this machine keeps it: a third party's
+# binary is not committed, so the path comes from the environment and the test
+# is skipped when nothing names one. SHA-256 f31375b1cbba860ed4014038bdb8c4c8
+# 16ff3cf24ed6d1f37ac756a10fd3898c, 964,096 bytes.
+DEVCPP = Path(os.environ.get("EXERADAR_DEVCPP", r"C:\Dev-Cpp\devcpp.exe"))
 
 TALKS_TO_THE_NETWORK = [
     Import(dll="KERNEL32.dll", functions=["CreateFileW"]),
@@ -129,10 +134,10 @@ def test_the_json_carries_the_version(pe_stating_its_version):
 # ── the file that was measured, when it is on this machine ─────────────────
 
 
-@pytest.mark.skipif(not DEVCPP.is_file(), reason=f"{DEVCPP} is not installed here")
+@pytest.mark.skipif(not DEVCPP.is_file(), reason=f"{DEVCPP} is not here; set EXERADAR_DEVCPP")
 def test_dev_cpp_is_not_accused_over_its_own_version():
     """Dev-C++ 4.9.9.2: unsigned, UPX-packed, imports wininet.dll. Not copied
-    into the repository — read where it is installed, and skipped elsewhere."""
+    into the repository — read where EXERADAR_DEVCPP says, skipped elsewhere."""
     result = scanner.scan(DEVCPP)
 
     assert result.error is None
