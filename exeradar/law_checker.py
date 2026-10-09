@@ -137,6 +137,11 @@ ADDRESSES_WITHOUT_NETWORK_NOTE = (
 _THIS_NETWORK = "0."
 _LOOPBACK = "127."
 
+# Addresses named in the evidence of one finding before the rest are counted.
+# node.exe carried 191 and the evidence ran to nine lines of console; the full
+# list is in the JSON under strings, which is where a tool reads it.
+_EVIDENCE_SHOWN = 10
+
 
 def reaches_the_network(result: ExeResult) -> bool:
     """Whether the import table shows any way of contacting an address.
@@ -252,9 +257,16 @@ SEVERITY = {
 def findings_for(result: ExeResult, *, now: datetime | None = None) -> list[Finding]:
     """The same findings as `findings_of`, as the objects the model carries."""
     return [
-        Finding(id=name, severity=SEVERITY[name], evidence="; ".join(evidence))
+        Finding(id=name, severity=SEVERITY[name], evidence=_summarised(evidence))
         for name, evidence in findings_of(result, now=now).items()
     ]
+
+
+def _summarised(evidence: list[str]) -> str:
+    """The evidence as one line: every item up to a point, then a count."""
+    if len(evidence) <= _EVIDENCE_SHOWN:
+        return "; ".join(evidence)
+    return "; ".join(evidence[:_EVIDENCE_SHOWN]) + f"; …and {len(evidence) - _EVIDENCE_SHOWN} more"
 
 
 def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:

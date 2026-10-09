@@ -561,3 +561,26 @@ def test_this_network_is_treated_as_the_loopback_is():
 
     assert law_checker.ADDRESSES_WITHOUT_NETWORK_NOTE not in notes
     assert law_checker.HARDCODED_IP_NOTE not in notes
+
+
+def test_the_evidence_of_a_finding_is_a_line_not_a_wall():
+    """node.exe listed 191 addresses in the evidence of one finding: nine
+    lines of the console and of the ticket, for a reader who wanted to know
+    there were many. The first ten are named and the rest are counted; the
+    whole list is still in the JSON, under strings."""
+    many = [f"203.0.113.{n}" for n in range(1, 41)]
+    findings = law_checker.findings_for(result(ips=many, imports=SOCKETS), now=NOW)
+
+    assert len(findings) == 1
+    evidence = findings[0].evidence
+    assert evidence.startswith("203.0.113.1; 203.0.113.2; ")
+    assert "203.0.113.10" in evidence
+    assert "203.0.113.11" not in evidence
+    assert evidence.endswith("…and 30 more")
+
+
+def test_ten_addresses_or_fewer_are_all_named():
+    ten = [f"203.0.113.{n}" for n in range(1, 11)]
+    findings = law_checker.findings_for(result(ips=ten, imports=SOCKETS), now=NOW)
+
+    assert findings[0].evidence == "; ".join(ten)

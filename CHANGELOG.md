@@ -33,6 +33,11 @@ no version in this file has ever matched — 40 is not a month, and
   whole block for "this network" and nothing is routed to it, so it is treated as
   the loopback is: reported as a string, raised as nothing.
 
+- **The evidence of a finding is a line, not a wall.** `hardcoded_ip` on `node.exe`
+  listed 191 addresses in one evidence string — nine lines of console, nine of
+  ticket. The first ten are named and the rest are counted (`…and 181 more`); the
+  whole list stays in the JSON under `strings.ips`, where a tool reads it.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may
