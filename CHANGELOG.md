@@ -88,6 +88,12 @@ no version in this file has ever matched — 40 is not a month, and
   and `api-ms-win-core-libraryloader-l1-2-0.dll` is 40: on `notepad.exe`, `cmd.exe` and
   `git.exe` one count sat six places to the right of the others.
 
+- **The timestamp authority is spelled as the signer is.** The signer comes from LIEF
+  as `C=US, O=…, CN=…` and the authority came from asn1crypto as `Common Name: …;
+  Organization: …; Country: US`: two spellings of a distinguished name three lines
+  apart in the same report (`gpg.exe`, `docker.exe`, `Code.exe`). One spelling now, in
+  the order the certificate stores it.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

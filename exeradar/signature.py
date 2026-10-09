@@ -486,8 +486,46 @@ def _named_certificate(sid, content) -> str | None:
         if getattr(certificate, "serial_number", None) != serial:
             continue
         if certificate.issuer == issuer:
-            return certificate.subject.human_friendly
+            return _distinguished_name(certificate.subject)
     return None
+
+
+# asn1crypto names an attribute type in words; LIEF, and every certificate viewer,
+# by its X.520 short name. The report shows the signer through LIEF and the
+# timestamper through asn1crypto, and on 2026-10-09 showed `C=US, O=…, CN=…`
+# three lines above `Common Name: …; Organization: …; Country: US` on gpg.exe,
+# docker.exe and Code.exe. One spelling, the signer's.
+_SHORT_NAMES = {
+    "common_name": "CN",
+    "organization_name": "O",
+    "organizational_unit_name": "OU",
+    "country_name": "C",
+    "state_or_province_name": "ST",
+    "locality_name": "L",
+    "email_address": "emailAddress",
+    "serial_number": "serialNumber",
+    "street_address": "STREET",
+    "domain_component": "DC",
+    "business_category": "businessCategory",
+    "jurisdiction_country_name": "jurisdictionC",
+    "jurisdiction_state_or_province_name": "jurisdictionST",
+    "jurisdiction_locality_name": "jurisdictionL",
+}
+
+
+def _distinguished_name(name) -> str:
+    """An asn1crypto Name as `C=US, O=DigiCert, Inc., CN=DigiCert Timestamp 2021`.
+
+    In the order the certificate stores it, which is the order LIEF prints the
+    signer in. A type this table has no short name for keeps asn1crypto's word
+    or its dotted identifier, which is still one spelling: `kind=value`.
+    """
+    parts = []
+    for rdn in name.chosen:
+        for attribute in rdn:
+            kind = attribute["type"].native
+            parts.append(f"{_SHORT_NAMES.get(kind, kind)}={attribute['value'].native}")
+    return ", ".join(parts)
 
 
 def _authority(signed) -> str | None:
@@ -500,7 +538,7 @@ def _authority(signed) -> str | None:
         certificate = wrapped.chosen
         constraints = certificate.basic_constraints_value
         if not (constraints and constraints["ca"].native):
-            return certificate.subject.human_friendly
+            return _distinguished_name(certificate.subject)
     return None
 
 

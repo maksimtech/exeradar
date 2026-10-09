@@ -158,3 +158,14 @@ def test_a_countersignature_without_a_signing_time_says_so():
     assert when is None
     assert problem == "the countersignature carried no signing_time"
     assert authority is not None and "DigiCert Timestamp 2021" in authority
+
+
+def test_the_authority_is_written_as_the_signer_is(content):
+    """The signer comes from LIEF as `C=US, O=…, CN=…` and the authority came
+    from asn1crypto as `Common Name: …; Organization: …; Country: US`: two
+    spellings of a distinguished name in one report, three lines apart
+    (gpg.exe, docker.exe, Code.exe on 2026-10-09). One spelling, the signer's,
+    in the order the certificate stores it."""
+    _, authority, _ = signature.timestamp_of(content)
+
+    assert authority == "C=US, O=DigiCert, Inc., CN=DigiCert Timestamp 2021"

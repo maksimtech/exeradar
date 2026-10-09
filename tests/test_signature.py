@@ -166,3 +166,15 @@ def test_a_catalog_signed_binary_is_not_reported_as_unsigned(catalog_pe_path):
 def test_the_catalog_path_does_not_run_when_the_file_is_embedded_signed(signed_pe_path):
     """Path A wins: there is no reason to pay for a PowerShell start-up."""
     assert signature.inspect(signed_pe_path).state is SignatureState.EMBEDDED
+
+
+def test_the_timestamper_is_written_as_the_signer_is(signed_pe_path):
+    """Same spelling for both names in the report: `C=…, O=…, CN=…`, as LIEF
+    writes the signer, and not asn1crypto's `Common Name: …; Organization: …`."""
+    result = signature.inspect(signed_pe_path)
+    if not result.timestamper:
+        pytest.skip("this sample carries no countersignature")
+
+    assert result.timestamper.startswith(("C=", "CN=", "O="))
+    assert "Common Name:" not in result.timestamper
+    assert ", CN=" in result.timestamper or result.timestamper.startswith("CN=")
