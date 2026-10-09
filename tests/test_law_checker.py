@@ -527,3 +527,60 @@ def test_findings_for_builds_the_model_objects():
 
 def test_a_clean_file_carries_no_finding_objects():
     assert law_checker.findings_for(result(), now=NOW) == []
+
+
+# --------------------------------------------------------------------------
+# what Code.exe showed on 2026-10-09
+# --------------------------------------------------------------------------
+
+# Dotted quads read out of Code.exe (VS Code 1.105, Microsoft, 238 MB). The six
+# that begin with 0 sit in a resource table beside `0.0.10.4425`; none of them
+# can be a destination, because 0.0.0.0/8 is "this network" (RFC 1122 3.2.1.3,
+# RFC 6890) and no packet is routed to it. The others are Chromium's
+# DNS-over-HTTPS resolvers, and are endpoints.
+THIS_NETWORK = ["0.0.10.0", "0.0.100.0", "0.0.13.0", "0.0.14.0", "0.0.15.0", "0.1.0.0"]
+RESOLVERS = ["1.1.1.1", "8.8.8.8", "9.9.9.9", "149.112.112.112"]
+
+
+def test_this_network_is_not_an_endpoint():
+    """`0.0.0.0` was already excluded; `0.0.10.0` was raised as a hardcoded
+    address and cited against the CRA, from a Microsoft binary."""
+    assert findings_of(result(ips=THIS_NETWORK, imports=SOCKETS), now=NOW) == {}
+
+
+def test_the_resolvers_beside_them_are_still_a_finding():
+    found = findings_of(result(ips=[*THIS_NETWORK, *RESOLVERS], imports=SOCKETS), now=NOW)
+
+    assert found == {"hardcoded_ip": RESOLVERS}
+
+
+def test_this_network_is_treated_as_the_loopback_is():
+    """Not an endpoint, so neither the finding nor the note that explains a
+    withheld one: the same silence `0.0.0.0` and `127.0.0.1` already get."""
+    notes = notes_of(result(ips=THIS_NETWORK, imports=SOCKETS), now=NOW)
+
+    assert law_checker.ADDRESSES_WITHOUT_NETWORK_NOTE not in notes
+    assert law_checker.HARDCODED_IP_NOTE not in notes
+
+
+def test_the_evidence_of_a_finding_is_a_line_not_a_wall():
+    """node.exe listed 191 addresses in the evidence of one finding: nine
+    lines of the console and of the ticket, for a reader who wanted to know
+    there were many. The first ten are named and the rest are counted; the
+    whole list is still in the JSON, under strings."""
+    many = [f"203.0.113.{n}" for n in range(1, 41)]
+    findings = law_checker.findings_for(result(ips=many, imports=SOCKETS), now=NOW)
+
+    assert len(findings) == 1
+    evidence = findings[0].evidence
+    assert evidence.startswith("203.0.113.1; 203.0.113.2; ")
+    assert "203.0.113.10" in evidence
+    assert "203.0.113.11" not in evidence
+    assert evidence.endswith("…and 30 more")
+
+
+def test_ten_addresses_or_fewer_are_all_named():
+    ten = [f"203.0.113.{n}" for n in range(1, 11)]
+    findings = law_checker.findings_for(result(ips=ten, imports=SOCKETS), now=NOW)
+
+    assert findings[0].evidence == "; ".join(ten)

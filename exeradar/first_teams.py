@@ -231,17 +231,31 @@ def resolve(
                 f"FIRST lists no member team matching {organisation!r}. FIRST is a "
                 "membership body and does not list every PSIRT, so this is not a "
                 "finding about the vendor: check its security.txt and its own "
-                "advisory page."
+                "advisory page. The directory is searched by team name, so an "
+                "organisation's name finds nothing when its team is called otherwise."
             ),
         )
 
-    names = ", ".join(team.host or team.name for team in candidates)
+    # Named by the team, with the organisation beside it. The directory searches
+    # team names and not hosts: `?q=Microsoft` returns Microsoft Security PSIRT,
+    # hosted by Microsoft Corporation, and `?q=Microsoft Corporation` returns
+    # nothing — measured 2026-10-09. Printing the host alone told a reader to ask
+    # again with a name that could not be found.
+    names = ", ".join(described(team) for team in candidates)
     return Resolution(
         team=None,
         candidates=candidates,
         reason=(
             f"no exact match for {organisation!r}; the directory returned {names}. "
-            "Choose by name rather than letting the order choose: these are "
-            "different organisations with different addresses and keys."
+            "Ask again with the team's name, which is what the directory searches, "
+            "rather than letting the order choose: these are different organisations "
+            "with different addresses and keys."
         ),
     )
+
+
+def described(team: Team) -> str:
+    """The team by the name the directory can be asked for, and whose it is."""
+    if team.host and team.host.casefold() != team.name.casefold():
+        return f"{team.name} ({team.host})"
+    return team.name

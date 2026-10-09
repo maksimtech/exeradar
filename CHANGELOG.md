@@ -12,6 +12,111 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Fixed
+
+- **The file's own version is not an address.** `C:\Dev-Cpp\devcpp.exe` (Dev-C++
+  4.9.9.2, Delphi, UPX-packed, unsigned, measured 2026-10-09) was reported with
+  `hardcoded_ip: 4.9.9.2` and cited against the CRA. `4.9.9.2` is what its
+  VERSIONINFO resource declares, twice: as the fixed numbers of VS_FIXEDFILEINFO and
+  as the StringFileInfo value under `FileVersion` — and that value is the very string
+  the strings pass reads, standing a few padding bytes away from the key that names
+  it, so the `Version=` corroboration never saw the pair. The PE parser now reads the
+  resource into the result (`version`, printed as `version 4.9.9.2, product 5` and
+  carried in the JSON), and a dotted quad equal to anything it declares is the
+  version, not an address: no finding, no citation. Only what the resource says —
+  ICU's `78.2.0.0` in node.exe is a third party's version the file never names as
+  one, and it is still reported.
+
+- **An object identifier is not an IP address.** Run on 2026-10-09 against the
+  binaries on a Windows 11 workstation, `gpg.exe` 2.5.24 was reported with four
+  hardcoded addresses — `1.3.101.110` to `1.3.101.113`, RFC 8410's X25519, X448,
+  Ed25519 and Ed448 — and `node.exe` with 189, the whole of OpenSSL's X.520 and X.509
+  object table (`2.5.4.3` is commonName). Both raised `hardcoded_ip` and cited the CRA.
+  A dotted quad under one of the arcs the registries assign at four components
+  (`1.3.6.1`, `1.3.14.3`, `1.3.36`, `1.3.101`, `1.3.132.0`, `2.5`, `2.23`) is now
+  read as an identifier when the same file carries an identifier no address can be —
+  five arcs, or an arc past 255. Corroboration inside the file, as for versions: the
+  arcs are also allocated address blocks, so the arc alone decides nothing, and
+  Cloudflare's `1.1.1.1` beside Chromium's OpenSSL table is still reported.
+
+- **An address in 0.0.0.0/8 is not an endpoint.** `0.0.0.0` was already how a
+  program binds rather than somewhere it calls; the rest of the block was not, and
+  Code.exe (VS Code 1.105, Microsoft) was reported with `0.0.10.0`, `0.0.100.0`,
+  `0.1.0.0` as hardcoded addresses out of a resource table. RFC 1122 reserves the
+  whole block for "this network" and nothing is routed to it, so it is treated as
+  the loopback is: reported as a string, raised as nothing.
+
+- **The evidence of a finding is a line, not a wall.** `hardcoded_ip` on `node.exe`
+  listed 191 addresses in one evidence string — nine lines of console, nine of
+  ticket. The first ten are named and the rest are counted (`…and 181 more`); the
+  whole list stays in the JSON under `strings.ips`, where a tool reads it.
+
+- **A function imported by ordinal is counted.** It has no name, and was dropped:
+  `powershell.exe` was shown importing `0` functions from `ATL.DLL`, and `Code.exe`
+  29 from `WS2_32.dll` when it asks for 54, 25 of them by number. An ordinal is now a
+  function named `#7`, the way dumpbin writes one; the category rules read nothing
+  from it, since a number carries no verb.
+
+- **A section name longer than eight bytes is read from the string table.**
+  `docker.exe` (Go) showed eight sections called `/4`, `/19`, `/32` … `/112`, five of
+  them at entropy 8.00 and coloured as packed. `/N` is the PE/COFF convention for a
+  name kept in the COFF string table at offset N; resolved, they are `.zdebug_info`,
+  `.zdebug_line` and their siblings — compressed DWARF, which is what 8.00 means
+  once the name can be read. A `/N` with no table behind it is kept as written.
+
+- **Section entropy is read from LIEF, not recomputed byte by byte.** `Code.exe`
+  (VS Code, 238 MB) took 24 s to analyse; six of them were `Counter()` walking the
+  186 MB of its `.text` for a number LIEF had computed in 70 ms. The parser reads
+  LIEF's figure and puts its sign right (`-0.0` for a section of one repeated byte
+  is what the old wiring existed to avoid); `entropy()` stays as the reference the
+  tests hold it to. 14 s on the same file.
+
+- **A scheme is a URL only when a host follows it.** Go writes its string literals
+  back to back, so `go.exe` and `docker.exe` reported `https://,`, `https://H` and
+  `http://);` as URLs, and Node's templates `http://${input}` and `http://%s:80` came
+  out of `node.exe` and `Code.exe` the same way — 139 of Code.exe's 1,508. Two labels
+  or an address make a host; one label does with a path or a port after it
+  (`http://wpad/wpad.dat`, `http://localhost:8000`) and does not without
+  (`http://An`). The punctuation of the sentence a URL was quoted in is no longer
+  part of it: `https://www.python.org/psf/license/)` out of `python314.dll` loses
+  its bracket, `Go_(programming_language)` keeps the one it opened, and
+  `https://proxy.golang.org.` keeps its root dot.
+
+- **An identifier that ends in a delegated word is not a host.** `powershell.exe`
+  reported eleven hosts and all were .NET namespaces (`System.Net.Ping`,
+  `System.IO`); `docker.exe` 103, of which 89 were Go symbols (`bytes.Compare`,
+  `errors.As`) or debris (`0y.nf`, `LG.HK`); `python314.dll` had `StreamReader.read`.
+  A label written in both cases is an identifier — DNS is case-insensitive and
+  nobody writes a hostname in CamelCase — and a host needs one label of three
+  characters, where it needed two (`t.co` joins `x.co` as the cost). `.cat` is a
+  Windows catalog before it is Catalonia: `WIREGUARD.CAT` is a file.
+
+- **A path names a directory somewhere along it.** `/1/4`, `/./u`, `/o/O`, `/-/S/k/`,
+  `/s/s/s/s/s/s` were reported as paths — four printable bytes with slashes in them,
+  which is what the minimum string length lets through: eleven of `docker.exe`'s
+  2,218, sixteen of `node.exe`'s 250, thirty-two of `Code.exe`'s 87. A Unix path now
+  needs one segment of three characters, anywhere — `/go/src/github.com/docker/cli/…`,
+  Docker's GOPATH, opens with two and stays, as do the other 2,207 source paths of
+  docker.exe, every one of them real.
+
+- **The import column is as wide as the longest name shown.** It was 34 characters,
+  and `api-ms-win-core-libraryloader-l1-2-0.dll` is 40: on `notepad.exe`, `cmd.exe` and
+  `git.exe` one count sat six places to the right of the others.
+
+- **The timestamp authority is spelled as the signer is.** The signer comes from LIEF
+  as `C=US, O=…, CN=…` and the authority came from asn1crypto as `Common Name: …;
+  Organization: …; Country: US`: two spellings of a distinguished name three lines
+  apart in the same report (`gpg.exe`, `docker.exe`, `Code.exe`). One spelling now, in
+  the order the certificate stores it.
+
+- **`psirt` names a candidate by what the directory searches.** `exeradar psirt
+  Microsoft` answered "no exact match; the directory returned Microsoft Corporation.
+  Choose by name", and `psirt "Microsoft Corporation"` then found no member at all:
+  FIRST's directory searches team names, not host organisations. A candidate is now
+  `Microsoft Security PSIRT (Microsoft Corporation)`, the reason says to ask again
+  with the team's name, and an empty answer says what was searched. Both bodies are
+  recorded as the API answered on 2026-10-09.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

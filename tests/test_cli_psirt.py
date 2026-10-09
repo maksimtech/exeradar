@@ -212,3 +212,23 @@ def test_key_refuses_on_an_ambiguous_name_instead_of_printing_one(answering):
     # As above: without this the test passes against a command that does not exist.
     assert "No such command" not in outcome.output
     assert "exact" in outcome.output.lower()
+
+
+def test_a_candidate_is_printed_by_the_name_that_will_resolve(answering):
+    """The line used to print the host organisation, which the directory does
+    not search: `exeradar psirt Microsoft` printed `Microsoft Corporation`, and
+    `exeradar psirt "Microsoft Corporation"` then found nothing. The team's
+    name is what resolves, so it leads; the organisation follows it."""
+    msrc = first_teams.Team(
+        id="microsoft_security_psirt", name="Microsoft Security PSIRT",
+        full_name="Microsoft Security PSIRT", host="Microsoft Corporation",
+        membership="Full Member", country="US", email="msft-security-first@microsoft.com",
+    )
+    answering(first_teams.Resolution(team=None, candidates=[msrc], reason="no exact match for 'Microsoft'"))
+
+    outcome = runner.invoke(app, ["psirt", "Microsoft"])
+
+    assert outcome.exit_code == 2
+    line = next(line for line in outcome.output.splitlines() if "msft-security-first@microsoft.com" in line)
+    assert line.strip().startswith("Microsoft Security PSIRT")
+    assert "Microsoft Corporation" in line

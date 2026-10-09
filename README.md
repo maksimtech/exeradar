@@ -57,6 +57,7 @@ $ exeradar analyze python.exe
 python.exe
   PE AMD64, 106,208 bytes, built 2026-08-05 10:58:33 UTC
   sha256 4942b86a6597e5aee0128daa00050ed79bc21f6e709a78eb19cbfeb0c2f39ac9
+  version 3.14.7150.1013, written as 3.14.7
   overlay 14,048 bytes past the last section, not read for strings
 
 Signature embedded

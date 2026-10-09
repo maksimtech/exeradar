@@ -565,3 +565,26 @@ def test_the_output_examples_in_the_readme_are_what_the_tool_prints():
             assert line == ok or line.startswith((bad_prefix, open_prefix)), line
         if re.match(r"^\d+ files, ", line):
             assert re.match(r"^\d+ files, \d+ matching their signature, \d+ with findings$", line), line
+
+
+def test_the_import_counts_line_up_whatever_the_dll_name_length():
+    """`api-ms-win-core-libraryloader-l1-2-0.dll` is 40 characters and the
+    column was 34 wide: on notepad.exe, cmd.exe and git.exe the count of that
+    row sat six places to the right of the others. The column is as wide as the
+    longest name shown."""
+    result = ExeResult(
+        path="x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        imports=[
+            Import(dll="USER32.dll", functions=["a"] * 87),
+            Import(dll="api-ms-win-core-libraryloader-l1-2-0.dll", functions=["a"] * 10),
+            Import(dll="api-ms-win-core-registry-l1-1-0.dll", functions=["RegOpenKeyExW"] * 9),
+        ],
+    )
+    console = Console(record=True, width=200)
+
+    report.to_console(result, console=console)
+
+    rows = [line for line in console.export_text().splitlines() if ".dll" in line]
+    assert len(rows) == 3
+    ends = {len(line.rstrip().split("  registry")[0].rstrip()) for line in rows}
+    assert len(ends) == 1, rows

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import lief
 
-from exeradar.models import ExeResult, Import, Section
+from exeradar.models import ExeResult, Import, Section, Version
 
 CATEGORIES = ("network", "crypto", "process", "registry")
 
@@ -103,6 +103,105 @@ def _as_text(name: str | bytes) -> str:
     return name
 
 
+def _section_name(section) -> str:
+    """The section's name, long names included.
+
+    The header holds eight bytes. A longer name lives in the COFF string table
+    and the header says `/N`, the decimal offset of the name in it — the PE/COFF
+    specification's convention, and the one Go's linker uses for every
+    `.zdebug_*` section. docker.exe (Docker Inc, Go, measured 2026-10-09) showed
+    eight sections called `/4`, `/19`, `/32`, `/46`, `/65`, `/78`, `/95`, `/112`,
+    five of them at entropy 8.00 and coloured as packed; readable, they are
+    `.zdebug_info` and its siblings, compressed DWARF, and 8.00 is what that is.
+
+    LIEF resolves the reference when the table is there. When it is not — a
+    header that says `/4` in a file with no string table — the raw name is kept:
+    the convention is only an offset, and an offset into nothing names nothing.
+    """
+    name = _as_text(section.name)
+    if name.startswith("/") and name[1:].isdigit():
+        resolved = getattr(section, "coff_string", None)
+        long_name = getattr(resolved, "string", None) if resolved is not None else None
+        if long_name:
+            return _as_text(long_name)
+    return name
+
+
+def _function_name(entry) -> str:
+    """What the import table asks the DLL for: a name, or a number.
+
+    A function imported by ordinal has no name, and was dropped: powershell.exe
+    showed `ATL.DLL 0`, and Code.exe showed 29 functions from WS2_32.dll when it
+    asks for 54, 25 of them by number. `#7` is how dumpbin and the linker's map
+    files write an ordinal, so it is readable next to the names; `categorise`
+    reads nothing from it, since there is no verb in a number.
+    """
+    if entry.name:
+        return _as_text(entry.name)
+    return f"#{entry.ordinal}"
+
+
+def _dotted(ms: int, ls: int) -> str | None:
+    """Two dwords of VS_FIXEDFILEINFO as the four numbers Explorer shows.
+
+    Each dword holds two 16-bit words, major.minor and build.revision. A block
+    of zeros declares nothing, and None says so rather than `0.0.0.0`.
+    """
+    if not ms and not ls:
+        return None
+    return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
+
+
+def _string_entry(table, key: str) -> str | None:
+    """One StringFileInfo value, or None when absent or blank: devcpp.exe
+    writes `LegalTrademarks` as an empty string, and an empty version is none."""
+    if table is None:
+        return None
+    value = table.get(key)
+    return value.strip() or None if value else None
+
+
+def version_of(binary: lief.PE.Binary) -> Version | None:
+    """What the VERSIONINFO resource declares, or None when it declares nothing.
+
+    Both halves of the resource are read, because they answer differently.
+    The fixed block is what Explorer shows as "File version" and what an
+    installer compares. The StringFileInfo values are the text the manufacturer
+    typed — and that text is the very UTF-16 string the strings pass extracts
+    from `.rsrc`: devcpp.exe's `4.9.9.2` on its own is its FileVersion value,
+    standing a few padding bytes away from the key that names it. The first
+    string table is the one read; a file with several language blocks states
+    the same version in each.
+
+    The resource tree is the part of a PE a packer rewrites, and LIEF raises on
+    one it cannot walk. Any failure is the same answer as no resource at all.
+    """
+    try:
+        if not binary.has_resources:
+            return None
+        # Typed as a manager or a LIEF error code, and the error is a value here
+        # rather than an exception.
+        manager = binary.resources_manager
+        if not isinstance(manager, lief.PE.ResourcesManager) or not manager.has_version:
+            return None
+        entries = list(manager.version)
+    except Exception:  # noqa: BLE001 - an unreadable resource declares nothing
+        return None
+    for entry in entries:
+        info = entry.file_info
+        strings = entry.string_file_info
+        table = next(iter(strings.children), None) if strings is not None else None
+        version = Version(
+            file=_dotted(info.file_version_ms, info.file_version_ls) if info is not None else None,
+            product=_dotted(info.product_version_ms, info.product_version_ls) if info is not None else None,
+            file_string=_string_entry(table, "FileVersion"),
+            product_string=_string_entry(table, "ProductVersion"),
+        )
+        if version.stated():
+            return version
+    return None
+
+
 def parse(path: str | Path) -> lief.PE.Binary | None:
     """LIEF's parser, handed the bytes rather than the name.
 
@@ -174,6 +273,16 @@ def entropy(data: bytes) -> float:
     )
 
 
+def _positive(value: float) -> float:
+    """LIEF's entropy as the report may print it: never -0.0.
+
+    The textbook form negates a sum, and for one repeated byte that sum is
+    1 · log2(1) = 0.0 — negated, -0.0, which formats as "-0.00". IEEE 754 has
+    -0.0 + 0.0 == +0.0, and every other value is unchanged.
+    """
+    return float(value) + 0.0
+
+
 def categorise(dll: str, functions: Iterable[str] = ()) -> frozenset[str]:
     """What a DLL and the functions called from it say about the binary.
 
@@ -224,22 +333,27 @@ class PEParser:
         result.format = "PE"
         result.arch = str(header.machine).rsplit(".", 1)[-1]
         result.built = self._built(header.time_date_stamps)
-        # Our entropy(), not LIEF's section.entropy: LIEF computes it the
-        # textbook way and returns -0.0 for a section of one repeated byte, and
-        # reading its value meant the tested function never reached the report.
+        result.version = version_of(binary)
+        # LIEF's section.entropy, with its sign put right. It was `entropy()`
+        # over `bytes(section.content)`, so that the tested function reached the
+        # report — and on Code.exe (VS Code, 238 MB) that was six seconds of
+        # Counter() walking the 186 MB of .text one byte at a time, for a number
+        # LIEF had computed in 70 ms. The two agree to the last digit, which
+        # test_pe holds them to; what LIEF gets wrong is the sign of nothing,
+        # and `_positive` is what puts it right.
         result.sections = [
             Section(
-                name=_as_text(section.name),
+                name=_section_name(section),
                 virtual_size=section.virtual_size,
                 raw_size=section.sizeof_raw_data,
-                entropy=entropy(bytes(section.content)),
+                entropy=_positive(section.entropy),
             )
             for section in binary.sections
         ]
         result.imports = [
             Import(
                 dll=_as_text(imported.name),
-                functions=[_as_text(entry.name) for entry in imported.entries if entry.name],
+                functions=[_function_name(entry) for entry in imported.entries if entry.name or entry.is_ordinal],
             )
             for imported in binary.imports
         ]

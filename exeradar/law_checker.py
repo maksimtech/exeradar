@@ -129,9 +129,18 @@ ADDRESSES_WITHOUT_NETWORK_NOTE = (
     "driver version). A packed binary can still resolve network APIs at run time"
 )
 
-# How a program binds, not somewhere it calls.
-_UNSPECIFIED = "0.0.0.0"
+# How a program binds, not somewhere it calls. The whole of 0.0.0.0/8 and not
+# only 0.0.0.0: RFC 1122 3.2.1.3 and RFC 6890 reserve the block for "this
+# network", and no packet is routed to it. Code.exe (VS Code 1.105, measured
+# 2026-10-09) keeps `0.0.10.0`, `0.0.100.0`, `0.1.0.0` in a resource table beside
+# `0.0.10.4425`, and was accused over them.
+_THIS_NETWORK = "0."
 _LOOPBACK = "127."
+
+# Addresses named in the evidence of one finding before the rest are counted.
+# node.exe carried 191 and the evidence ran to nine lines of console; the full
+# list is in the JSON under strings, which is where a tool reads it.
+_EVIDENCE_SHOWN = 10
 
 
 def reaches_the_network(result: ExeResult) -> bool:
@@ -170,7 +179,7 @@ def _expiry(value: str | None) -> datetime | None:
 
 
 def _is_local(address: str) -> bool:
-    return address == _UNSPECIFIED or address.startswith(_LOOPBACK)
+    return address.startswith((_THIS_NETWORK, _LOOPBACK))
 
 
 def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, list[str]]:
@@ -248,9 +257,16 @@ SEVERITY = {
 def findings_for(result: ExeResult, *, now: datetime | None = None) -> list[Finding]:
     """The same findings as `findings_of`, as the objects the model carries."""
     return [
-        Finding(id=name, severity=SEVERITY[name], evidence="; ".join(evidence))
+        Finding(id=name, severity=SEVERITY[name], evidence=_summarised(evidence))
         for name, evidence in findings_of(result, now=now).items()
     ]
+
+
+def _summarised(evidence: list[str]) -> str:
+    """The evidence as one line: every item up to a point, then a count."""
+    if len(evidence) <= _EVIDENCE_SHOWN:
+        return "; ".join(evidence)
+    return "; ".join(evidence[:_EVIDENCE_SHOWN]) + f"; …and {len(evidence) - _EVIDENCE_SHOWN} more"
 
 
 def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:

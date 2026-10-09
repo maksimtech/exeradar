@@ -196,7 +196,9 @@ def scan(path: str | Path) -> ExeResult:
     # at all. Calling `strings.from_file` here as well would read the file a second
     # time, which on a 25 MB DLL is the whole cost of the scan again.
     found = strings.extract_raw(path.read_bytes(), exclude=excluded)
-    result.strings = strings.classify(found)
+    # With what the VERSIONINFO resource declares, so that the file's own version
+    # is classified as one and not as an address it contacts.
+    result.strings = strings.classify(found, versions=result.version.stated() if result.version else ())
     # After the imports, which it reads: a library the file names a version for is
     # reported with it, and one it merely imports is reported as a file to open next.
     result.libraries = libraries.from_strings_and_imports(found, result.imports)
