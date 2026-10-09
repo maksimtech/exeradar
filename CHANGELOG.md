@@ -78,6 +78,12 @@ no version in this file has ever matched — 40 is not a month, and
   characters, where it needed two (`t.co` joins `x.co` as the cost). `.cat` is a
   Windows catalog before it is Catalonia: `WIREGUARD.CAT` is a file.
 
+- **A path names a directory somewhere along it.** `docker.exe` reported 2,218 paths
+  and 1,390 were `/1/4`, `/./u`, `/-/S/k/`: four printable bytes with slashes in
+  them, which is what the minimum string length lets through. A Unix path now needs
+  one segment of three characters, anywhere — `/go/src/github.com/docker/cli/…`,
+  Docker's GOPATH, opens with two and stays.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

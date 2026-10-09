@@ -171,7 +171,7 @@ def classify(candidates: Iterable[str]) -> Strings:
             if text not in declared_versions and not (has_oids and _under_an_oid_arc(text)):
                 ips.add(text)
             continue
-        if _WINDOWS_PATH.match(text) or _UNIX_PATH.match(text):
+        if _WINDOWS_PATH.match(text) or _is_unix_path(text):
             paths.add(text)
             continue
         if _is_host(text):
@@ -388,6 +388,20 @@ def _is_ipv4(text: str) -> bool:
     if not match:
         return False
     return all(0 <= int(octet) <= 255 for octet in match.groups())
+
+
+def _is_unix_path(text: str) -> bool:
+    """An absolute path, and not four bytes with slashes in them.
+
+    The minimum string length is four, and `/o/O` is four printable bytes:
+    docker.exe gave 2,218 paths on 2026-10-09 and 1,390 of them were `/1/4`,
+    `/./u`, `/-/S/k/`. A path names a directory somewhere along it, so one
+    segment of three characters is asked for — anywhere, not first: `/go/src/
+    github.com/docker/...` is the GOPATH of the machine that built it.
+    """
+    if not _UNIX_PATH.match(text):
+        return False
+    return any(len(segment) >= 3 for segment in text.split("/"))
 
 
 def _is_host(text: str) -> bool:
