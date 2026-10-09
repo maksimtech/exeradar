@@ -327,3 +327,41 @@ def test_the_live_directory_still_answers_the_way_this_parser_reads_it():
     ambiguous = first_teams.resolve("Hewlett Packard")
     assert ambiguous.team is None
     assert any("Enterprise" in (team.host or "") for team in ambiguous.candidates)
+
+
+# ── the name the directory can be asked for ─────────────────────────────────
+
+
+def test_the_candidates_are_named_by_what_the_directory_searches():
+    """`exeradar psirt Microsoft` answered "no exact match; the directory
+    returned Microsoft Corporation. Choose by name" — and `psirt "Microsoft
+    Corporation"` then answered that FIRST lists no such member. The directory
+    searches team names, not host organisations: `?q=Microsoft` finds Microsoft
+    Security PSIRT, `?q=Microsoft Corporation` finds nothing. Both bodies are
+    recorded as api.first.org answered on 2026-10-09. A candidate has to be
+    named by the name that will resolve, with the organisation beside it."""
+    with _replaying(FIXTURES / "first_teams_microsoft.json", query="Microsoft") as client:
+        resolution = first_teams.resolve("Microsoft", client=client)
+
+    assert resolution.team is None
+    assert [team.name for team in resolution.candidates] == ["Microsoft Security PSIRT"]
+    assert "Microsoft Security PSIRT" in resolution.reason
+    assert "Microsoft Corporation" in resolution.reason
+    assert "team" in resolution.reason.lower()
+
+
+def test_an_organisation_that_finds_nothing_is_told_what_is_searched():
+    with _replaying(FIXTURES / "first_teams_microsoft_corporation.json", query="Microsoft Corporation") as client:
+        resolution = first_teams.resolve("Microsoft Corporation", client=client)
+
+    assert resolution.team is None
+    assert resolution.candidates == []
+    assert "team name" in resolution.reason.lower()
+
+
+def test_the_team_name_resolves_what_the_organisation_could_not():
+    with _replaying(FIXTURES / "first_teams_microsoft.json", query="Microsoft Security PSIRT") as client:
+        resolution = first_teams.resolve("Microsoft Security PSIRT", client=client)
+
+    assert resolution.team is not None
+    assert resolution.team.email == "msft-security-first@microsoft.com"

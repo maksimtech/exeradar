@@ -94,6 +94,14 @@ no version in this file has ever matched — 40 is not a month, and
   apart in the same report (`gpg.exe`, `docker.exe`, `Code.exe`). One spelling now, in
   the order the certificate stores it.
 
+- **`psirt` names a candidate by what the directory searches.** `exeradar psirt
+  Microsoft` answered "no exact match; the directory returned Microsoft Corporation.
+  Choose by name", and `psirt "Microsoft Corporation"` then found no member at all:
+  FIRST's directory searches team names, not host organisations. A candidate is now
+  `Microsoft Security PSIRT (Microsoft Corporation)`, the reason says to ask again
+  with the team's name, and an empty answer says what was searched. Both bodies are
+  recorded as the API answered on 2026-10-09.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

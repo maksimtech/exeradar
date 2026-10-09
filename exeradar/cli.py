@@ -374,7 +374,9 @@ def psirt(
     if team is None:
         typer.secho(resolution.reason, fg=typer.colors.YELLOW, err=True)
         for candidate in resolution.candidates:
-            typer.echo(f"  {candidate.host or candidate.name}  {candidate.email}")
+            # The team's name first: it is what the directory searches, so it
+            # is what the next command can be given. The host alone was not.
+            typer.echo(f"  {first_teams.described(candidate)}  {candidate.email}")
         # Candidates mean the question has more than one answer; none means the
         # directory answered that it has no such member.
         raise typer.Exit(2 if resolution.candidates else 1)
