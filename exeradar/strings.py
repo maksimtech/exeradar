@@ -205,8 +205,84 @@ def _urls_in(text: str) -> list[str]:
     seven URLs came back as `Vhttp://...crl0t`, scheme and all, because the
     pattern only asked for "something, then ://". Plural since a font's name
     table ran three of them together; see _URL.
+
+    Then two more refusals, both from running it against Go and Node binaries
+    on 2026-10-09. Go writes its string literals back to back, so `https://`
+    is followed by whatever came next in the table — `https://,`, `https://H`,
+    `http://);` — and Node's test code carries `http://${input}` and
+    `http://%s:80`; a scheme is only a URL when a host follows it, which is
+    `_has_a_host`. And a URL quoted in a sentence ends with that sentence's
+    punctuation — `https://www.python.org/psf/license/)` out of python314.dll
+    — which is `_unpunctuated`.
     """
-    return [url for url in (_trim(m.group()) for m in _URL.finditer(text)) if url]
+    found = []
+    for match in _URL.finditer(text):
+        url = _unpunctuated(_trim(match.group()))
+        if url and _has_a_host(url):
+            found.append(url)
+    return found
+
+
+# The authority after the scheme: an optional user part, then a bracketed IPv6
+# address or dotted labels with an optional root dot, then an optional port, then
+# whatever the path, query or fragment is. Nothing else may follow the host.
+_AUTHORITY = re.compile(
+    rf"^{_SCHEME}(?:[^@/\s]+@)?"
+    r"(?:\[[0-9a-f:.]+\]|(?P<host>[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?P<root>\.?)))"
+    r"(?P<port>:\d{1,5})?(?P<rest>[/?#].*)?$",
+    re.I,
+)
+
+# What may close a sentence a URL was quoted in, and never a URL.
+_SENTENCE_PUNCTUATION = ".,;:!?'\""
+_CLOSERS = {")": "(", "]": "["}
+
+
+def _has_a_host(url: str) -> bool:
+    """Whether what follows the scheme is a host, by the only tests available.
+
+    Two labels or an address make a host on their own. One label is a host
+    when a path or a port follows it — `http://wpad/wpad.dat` is Chromium's
+    proxy discovery, `http://localhost:8000` is anybody's — and a sentence when
+    nothing does: `http://An`, `https://insecure`. A root dot is allowed only at
+    the very end, where Go's own source writes `https://proxy.golang.org.`;
+    `http://www./div` is two strings of a table read as one.
+    """
+    match = _AUTHORITY.match(url)
+    if match is None:
+        return False
+    host = match.group("host")
+    if host is None:                       # a bracketed IPv6 address
+        return True
+    labels = host.rstrip(".").split(".")
+    follows = bool(match.group("port") or match.group("rest"))
+    if match.group("root") and follows:
+        return False
+    if len(labels) >= 2:
+        return True
+    return host.lower() == "localhost" or (follows and not match.group("root"))
+
+
+def _unpunctuated(url: str) -> str:
+    """The URL without the punctuation of the sentence it was quoted in.
+
+    A closing bracket is kept when the URL opened it — Wikipedia's
+    `Go_(programming_language)` — and a final dot is kept when nothing but the
+    host precedes it, where it is a fully qualified name's root and not a full
+    stop; after a path it is the full stop.
+    """
+    while url:
+        last = url[-1]
+        if last in _CLOSERS:
+            if url.count(_CLOSERS[last]) >= url.count(last):
+                break
+        elif last == ".":
+            if "/" not in url.split("://", 1)[-1]:
+                break
+        elif last not in _SENTENCE_PUNCTUATION:
+            break
+        url = url[:-1]
+    return url
 
 
 def _trim(found: str) -> str:

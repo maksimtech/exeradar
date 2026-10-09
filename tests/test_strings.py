@@ -481,3 +481,69 @@ def test_the_exact_arcs_are_not_prefixes():
     found = strings.classify(["1.2.840.113549.1.1.1", "1.3.6.1", "1.3.6.10", "1.3.14.3", "1.3.14.30"])
 
     assert found.ips == ["1.3.14.30", "1.3.6.10"]
+
+
+# --------------------------------------------------------------------------
+# what Go, Node and Electron binaries showed on 2026-10-09
+# --------------------------------------------------------------------------
+
+# Printable runs out of go.exe, node.exe and Code.exe, verbatim. Go writes its
+# string literals back to back with no separator, so `https://` is followed by
+# whatever came next in the table; Node's test code carries format templates.
+# All of these were reported as URLs the program contacts.
+NOT_URLS = [
+    "http://${input}", "http://${requestHost}", "http://%s", "http://);", "http://.css",
+    "https://,", "https://H", "https://H9", "https://f", "http://An", "http://www",
+    "http://www.", "http://s..", "http://www./div", "http://%s:80", "https://...",
+    "http://file://-gorepochangedGODEBUGGOCACHEGOROOT=GOARCH=GOFILE=GOLINE=go",
+    "https://insecure", "http://encoding=", "https://${hostName}",
+]
+
+# From the same files, and real: a single-label intranet host, a loopback with a
+# port, a fully qualified name with its root dot, an address.
+STILL_URLS = [
+    "http://wpad/wpad.dat", "http://localhost:8000/v8/loadVMSymbols", "http://127.0.0.1",
+    "https://proxy.golang.org.", "https://go.dev/doc/godebug", "http://json-schema.org/draft-04/schema#",
+]
+
+
+@pytest.mark.parametrize("text", NOT_URLS)
+def test_a_scheme_followed_by_no_host_is_not_a_url(text):
+    assert strings.classify([text]).urls == []
+
+
+@pytest.mark.parametrize("text", STILL_URLS)
+def test_a_url_with_a_host_still_is_one(text):
+    assert text in strings.classify([text]).urls
+
+
+def test_a_single_label_host_needs_a_path_or_a_port():
+    """`http://wpad/wpad.dat` is Chromium's proxy discovery and `http://An` is a
+    sentence that followed the scheme in the string table. A path or a port is
+    what tells them apart; nothing else does."""
+    assert strings.classify(["http://wpad/wpad.dat"]).urls == ["http://wpad/wpad.dat"]
+    assert strings.classify(["http://intranet:8080"]).urls == ["http://intranet:8080"]
+    assert strings.classify(["http://An"]).urls == []
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("https://www.python.org/psf/license/)", "https://www.python.org/psf/license/"),   # python314.dll
+    ("http://narwhaljs.org)", "http://narwhaljs.org"),                                 # node.exe
+    ("https://code.org/moduleproxy.", "https://code.org/moduleproxy"),                 # go.exe, end of a sentence
+    ("https://go.dev/issue/66821):", "https://go.dev/issue/66821"),
+    ("https://go.dev/doc/godebug#go-1casgstatus:", "https://go.dev/doc/godebug#go-1casgstatus"),
+])
+def test_punctuation_that_closed_a_sentence_is_not_part_of_the_url(text, expected):
+    assert strings.classify([text]).urls == [expected]
+
+
+def test_a_parenthesis_the_url_opened_is_kept():
+    """Wikipedia-style: the bracket belongs to the path when the path opened it."""
+    url = "https://en.wikipedia.org/wiki/Go_(programming_language)"
+    assert strings.classify([url]).urls == [url]
+
+
+def test_a_root_dot_is_kept_when_nothing_follows_the_host():
+    """`https://proxy.golang.org.` is a fully qualified name, and Go's own
+    source writes it that way; it is only a sentence's full stop after a path."""
+    assert strings.classify(["https://proxy.golang.org."]).urls == ["https://proxy.golang.org."]

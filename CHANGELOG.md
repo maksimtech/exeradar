@@ -58,6 +58,17 @@ no version in this file has ever matched — 40 is not a month, and
   is what the old wiring existed to avoid); `entropy()` stays as the reference the
   tests hold it to. 14 s on the same file.
 
+- **A scheme is a URL only when a host follows it.** Go writes its string literals
+  back to back, so `go.exe` and `docker.exe` reported `https://,`, `https://H` and
+  `http://);` as URLs, and Node's templates `http://${input}` and `http://%s:80` came
+  out of `node.exe` and `Code.exe` the same way — 139 of Code.exe's 1,508. Two labels
+  or an address make a host; one label does with a path or a port after it
+  (`http://wpad/wpad.dat`, `http://localhost:8000`) and does not without
+  (`http://An`). The punctuation of the sentence a URL was quoted in is no longer
+  part of it: `https://www.python.org/psf/license/)` out of `python314.dll` loses
+  its bracket, `Go_(programming_language)` keeps the one it opened, and
+  `https://proxy.golang.org.` keeps its root dot.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may
