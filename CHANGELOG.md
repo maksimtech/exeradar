@@ -26,6 +26,13 @@ no version in this file has ever matched — 40 is not a month, and
   arcs are also allocated address blocks, so the arc alone decides nothing, and
   Cloudflare's `1.1.1.1` beside Chromium's OpenSSL table is still reported.
 
+- **An address in 0.0.0.0/8 is not an endpoint.** `0.0.0.0` was already how a
+  program binds rather than somewhere it calls; the rest of the block was not, and
+  Code.exe (VS Code 1.105, Microsoft) was reported with `0.0.10.0`, `0.0.100.0`,
+  `0.1.0.0` as hardcoded addresses out of a resource table. RFC 1122 reserves the
+  whole block for "this network" and nothing is routed to it, so it is treated as
+  the loopback is: reported as a string, raised as nothing.
+
 ### Changed
 
 - **The suite also runs on Python 3.15-dev**, as an experimental matrix row that may

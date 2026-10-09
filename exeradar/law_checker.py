@@ -129,8 +129,12 @@ ADDRESSES_WITHOUT_NETWORK_NOTE = (
     "driver version). A packed binary can still resolve network APIs at run time"
 )
 
-# How a program binds, not somewhere it calls.
-_UNSPECIFIED = "0.0.0.0"
+# How a program binds, not somewhere it calls. The whole of 0.0.0.0/8 and not
+# only 0.0.0.0: RFC 1122 3.2.1.3 and RFC 6890 reserve the block for "this
+# network", and no packet is routed to it. Code.exe (VS Code 1.105, measured
+# 2026-10-09) keeps `0.0.10.0`, `0.0.100.0`, `0.1.0.0` in a resource table beside
+# `0.0.10.4425`, and was accused over them.
+_THIS_NETWORK = "0."
 _LOOPBACK = "127."
 
 
@@ -170,7 +174,7 @@ def _expiry(value: str | None) -> datetime | None:
 
 
 def _is_local(address: str) -> bool:
-    return address == _UNSPECIFIED or address.startswith(_LOOPBACK)
+    return address.startswith((_THIS_NETWORK, _LOOPBACK))
 
 
 def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, list[str]]:
