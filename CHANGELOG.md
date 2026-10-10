@@ -12,6 +12,9 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+
+## [2026.43] - 2026-10-10
+
 ### Fixed
 
 - **The file's own version is not an address.** `C:\Dev-Cpp\devcpp.exe` (Dev-C++
@@ -1038,7 +1041,8 @@ signing, and the legal provisions the findings concern.
   `LibraryNotFoundError`.
 - Requires Python 3.11 or later; tested on 3.11, 3.12, 3.13 and 3.14.
 
-[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.42...HEAD
+[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.43...HEAD
+[2026.43]: https://github.com/maksimtech/exeradar/compare/v2026.42...v2026.43
 [2026.42]: https://github.com/maksimtech/exeradar/releases/tag/v2026.42
 [2026.41]: https://github.com/maksimtech/exeradar/releases/tag/v2026.41
 [2026.40.1]: https://github.com/maksimtech/exeradar/releases/tag/v2026.40.1
