@@ -48,6 +48,21 @@ def test_the_smoke_test_runs_before_anything_is_pushed():
     assert smoke_at < push_at, "the image is pushed before the smoke test runs"
 
 
+def test_the_base_image_is_pulled_with_credentials():
+    """Every build pulls python:*-slim from Docker Hub, and an anonymous pull
+    from a GitHub runner shares one rate limit with every other anonymous pull
+    from that address: on 2026-10-09 a day of builds across the five Radar ended
+    in `429 Too Many Requests` on the base image. The login has to come before
+    the first build, not only before the push, or the smoke-test build is the
+    one that fails and the release stops there."""
+    workflow = published()
+
+    login_at = workflow.index("docker/login-action")
+    first_build_at = workflow.index("docker/build-push-action")
+
+    assert login_at < first_build_at, "the first build pulls the base image anonymously"
+
+
 def test_the_published_image_is_built_from_the_tag_not_from_pypi():
     """apkradar, cookieradar and mailradar install themselves from PyPI inside the
     image, so their docker.yml has to poll until the release propagates —
