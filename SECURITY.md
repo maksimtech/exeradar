@@ -48,7 +48,7 @@ customers who have given a security contact also get a direct email.
 Every version stays installable and pinnable:
 
 - PyPI: `pip install exeradar==<version>`;
-- Docker Hub: `maksimtech/exeradar:<version>`, and the SHA256 digest of that image,
+- Docker Hub: `maksimtech/exeradar:v<version>`, and the SHA256 digest of that image,
   which cannot change.
 
 Rolling back means pinning the previous version or digest. Releases are cut with
