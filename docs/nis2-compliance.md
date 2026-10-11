@@ -79,7 +79,7 @@ notifica ai clienti, procedura di rollback. In sintesi:
   carico, anche se la correzione non è ancora pronta;
 - le vulnerabilità accettate, con motivazione e data di revisione, sono in
   `SECURITY-EXCEPTIONS.toml`;
-- ogni versione ha un tag Docker dedicato (es. `maksimtech/exeradar:2026.43`) e un
+- ogni versione ha un tag Docker dedicato (es. `maksimtech/exeradar:v2026.43`) e un
   digest SHA256 immutabile; il rollback consiste nel tornare a quel tag o a quel
   digest.
 
