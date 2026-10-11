@@ -31,3 +31,10 @@ jobs:
         run: ruff check exeradar tests tools
       - name: Type check (mypy)
         run: mypy exeradar
+      # docs/nis2-compliance.md shows uv.lock to a customer as the full list of
+      # dependencies, so it has to be the current one. The uv pinned here is the
+      # one that wrote the file.
+      - name: Lockfile matches pyproject.toml (uv)
+        run: |
+          python -m pip install "uv==0.12.18"
+          uv lock --check
