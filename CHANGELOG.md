@@ -12,6 +12,15 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Security
+
+- **`law_fetcher` now upgrades HTTPS→HTTP redirects to HTTPS.** Cellar
+  (`publications.europa.eu`) responds to every request with 303 → `http://`.
+  With `follow_redirects=True` httpx followed the downgrade silently, so
+  legislative content arrived without TLS verification. The fix re-requests
+  the redirect destination over HTTPS; the content is identical
+  (measured 2026-10-11). Affects all Radar that import `law_fetcher`.
+
 ### Fixed
 
 - **The file's own version is not an address.** `C:\Dev-Cpp\devcpp.exe` (Dev-C++
