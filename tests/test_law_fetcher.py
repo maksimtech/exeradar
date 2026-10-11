@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from exeradar import law_fetcher
@@ -28,6 +29,7 @@ from exeradar.law_fetcher import (
     CRA,
     Act,
     LawFetchError,
+    fetch_html as real_fetch_html,
     parse_articles,
 )
 
@@ -201,3 +203,55 @@ def test_normattiva_acts_do_not_go_through_cellar():
     italian = Act("x", "urn:nir:stato:legge:2000-01-01;1", source="Normattiva")
     with pytest.raises(ValueError):
         law_fetcher.fetch_act_html(italian, "IT")
+
+
+# ─── HTTPS→HTTP redirect upgrade ──────────────────────────────────────────────
+
+_CELLAR_HTTP = "http://publications.europa.eu/resource/cellar/resolved-content"
+_CELLAR_HTTPS = "https://publications.europa.eu/resource/cellar/resolved-content"
+
+
+def _mock_client(handler):
+    return httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+
+def test_cellar_http_redirect_is_upgraded_to_https():
+    """fetch_html must not accept content delivered over http://."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        seen.append(url)
+        if url == "https://publications.europa.eu/resource/celex/32024R2847":
+            return httpx.Response(303, headers={"Location": _CELLAR_HTTP})
+        if url == _CELLAR_HTTP:
+            return httpx.Response(200, text="<html>http-content</html>")
+        if url == _CELLAR_HTTPS:
+            return httpx.Response(200, text="<html>https-content</html>")
+        return httpx.Response(404)
+
+    client = _mock_client(handler)
+    result = real_fetch_html(
+        "https://publications.europa.eu/resource/celex/32024R2847", client=client
+    )
+
+    assert result == "<html>https-content</html>"
+    assert seen[-1] == _CELLAR_HTTPS
+    assert _CELLAR_HTTP in seen
+
+
+def test_https_to_https_redirect_is_not_re_requested():
+    """A redirect that stays on https:// must not cause a double request."""
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if str(request.url).endswith("/x"):
+            return httpx.Response(301, headers={"Location": "https://eur-lex.europa.eu/y"})
+        return httpx.Response(200, text="<html>ok</html>")
+
+    client = _mock_client(handler)
+    result = real_fetch_html("https://eur-lex.europa.eu/x", client=client)
+
+    assert result == "<html>ok</html>"
+    assert seen == ["https://eur-lex.europa.eu/x", "https://eur-lex.europa.eu/y"]
