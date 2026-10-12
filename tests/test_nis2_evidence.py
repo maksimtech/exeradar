@@ -101,6 +101,10 @@ def table_first_column(block: str) -> set[str]:
     return values
 
 
+def prose(text: str) -> str:
+    return " ".join(text.split())
+
+
 @pytest.fixture(scope="module")
 def doc() -> str:
     return DOC.read_text(encoding="utf-8")
@@ -427,3 +431,16 @@ def test_an_empty_repository_scan_is_not_presented_as_a_clean_one(doc):
     describe = _evidence_step("Describe the evidence")
     assert "found no file it could analyse" in describe
     assert "non indica l'assenza di vulnerabilità" in " ".join(doc.split())
+
+
+def test_the_branch_rules_are_described_without_an_exception(doc):
+    """On 2026-10-12 the ruleset on main lost the owner's bypass and requires a pull
+    request for every change, the version bump included (release.sh opens one). The
+    document says so with the date it was read, and keeps the earlier state as past."""
+    text = prose(doc)
+    assert "lette dalle impostazioni del repository il 2026-10-12" in text
+    assert "Non prevedono eccezioni, nemmeno per l'account del manutentore" in text
+    for stale in ("è configurato per poter scavalcare", "può scavalcare queste regole",
+                  "può scavalcare le regole", "vanno direttamente su `main`",
+                  "Non c'è una regola che imponga la pull request"):
+        assert stale not in text, stale

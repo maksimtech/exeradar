@@ -106,9 +106,13 @@ Analisi automatiche, ciascuna con il proprio workflow in `.github/workflows`:
 A questi si aggiungono i test automatici (pytest, con copertura inviata a Codecov),
 ruff e mypy nel workflow Quality.
 
-Le regole del ramo `main`, lette dalle impostazioni del repository il 2026-10-11,
-vietano la cancellazione e la riscrittura della storia, richiedono una storia lineare e
-due controlli superati: Tests e Quality. Non c'è una regola che imponga la pull request.
+Le regole del ramo `main`, lette dalle impostazioni del repository il 2026-10-12,
+impongono che ogni modifica passi da una pull request, senza approvazioni richieste, e
+che superi due controlli: Tests e Quality; richiedono una storia lineare e vietano la
+cancellazione del ramo e la riscrittura della storia. Non prevedono eccezioni, nemmeno
+per l'account del manutentore: anche il commit che aggiorna il numero di versione
+arriva su `main` attraverso una pull request. Fino a quel giorno non c'era una regola
+che imponesse la pull request, e l'account del manutentore poteva scavalcare le altre.
 Security Posture e CodeQL girano su ogni pull request ma non sono tra i controlli
 obbligatori.
 
