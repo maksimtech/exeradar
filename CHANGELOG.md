@@ -41,6 +41,12 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **On a pull request, Security Posture called live exceptions unused.** CodeQL reports only what
+  the change introduces on a pull request ref, so when it reported anything, an exception for a
+  finding still open on main in an untouched file matched nothing and failed the gate
+  (cookieradar #37, 2026-10-12). main's open alerts now count as history the record may match,
+  like the closed ones; blocking is still decided on the pull request's own alerts. Simulated on
+  #37's real alerts: the false "unused" goes, the real new alert stays.
 - **Security Posture judged every pull request by main's alerts.** It listed the alerts without
   a `ref`, so GitHub answered for main, and its wait compared the scanners' runs with the merge
   commit, which none of them carries: on mailradar #39 it waited two seconds. It now waits for
