@@ -183,6 +183,14 @@ why = """
 CVE-2026-102010. Open in trixie for both gcc-12 (12.4.0-5) and gcc-14 (14.2.0-19), with no fixed version in any suite and no Debian bug recorded — checked with `patchradar debian CVE-2026-102010`. So there is nothing to wait for and nothing to ask for: what moves a flaw in this state is evidence on the tracker page, https://security-tracker.debian.org/tracker/CVE-2026-102010.
 
 Nor is it removable here, and less so than anywhere else among the five. Snyk names the source package `gcc-14`; what is installed is `libstdc++6`, the C++ runtime — and exeradar's own parser is LIEF, a C++ library. Removing it would leave an image that cannot read a PE file.
+
+Since 2026-10-07T20:09:56Z Snyk Container has stopped reporting it, which is why \
+the gate lists this entry as settled. It is kept, and the reason is not how long \
+the silence has lasted: `patchradar debian CVE-2026-102010` on 2026-10-15 still \
+reports gcc-14 no-dsa in trixie at 14.2.0-19, with the fix only in sid \
+(14.4.0-3). The package named in `where` is still unfixed in trixie and only the \
+reporting changed. Deleting a flaw that is demonstrably present because a \
+scanner fell silent is the one direction this file must not drift in.
 """
 review_by = "2026-12-31"
 
@@ -221,6 +229,14 @@ https://security-tracker.debian.org/tracker/CVE-2026-102010.
 Two entries for one flaw is not duplication: the gate matches by id, and an id \
 with no entry fails the build whichever scanner emitted it. zlib has been in the \
 same position since September.
+
+Since 2026-10-07T20:07:31Z Docker Scout has stopped reporting it, which is why \
+the gate lists this entry as settled. It is kept, and the reason is not how long \
+the silence has lasted: `patchradar debian CVE-2026-102010` on 2026-10-15 still \
+reports gcc-14 no-dsa in trixie at 14.2.0-19, with the fix only in sid \
+(14.4.0-3). The package named in `where` is still unfixed in trixie and only the \
+reporting changed. Deleting a flaw that is demonstrably present because a \
+scanner fell silent is the one direction this file must not drift in.
 """
 review_by = "2026-12-31"
 
@@ -243,6 +259,14 @@ something to compile and nothing in this image compiles anything; a flaw in the 
 runtime is a different exposure. Which binary package is installed had been \
 asserted and not measured, so `tests/docker/inspect.sh` now prints the gcc and \
 libstdc++ packages and the next `docker-build-check` run answers it.
+
+Since 2026-10-08T15:18:28Z Snyk Container has stopped reporting it, which is why \
+the gate lists this entry as settled. It is kept, and the reason is not how long \
+the silence has lasted: `patchradar debian CVE-2026-95619` on 2026-10-15 still \
+reports gcc-14 no-dsa in trixie at 14.2.0-19, with the fix only in sid \
+(14.4.0-3). The package named in `where` is still unfixed in trixie and only the \
+reporting changed. Deleting a flaw that is demonstrably present because a \
+scanner fell silent is the one direction this file must not drift in.
 """
 review_by = "2026-12-31"
 
@@ -266,5 +290,13 @@ something to compile and nothing in this image compiles anything; a flaw in the 
 runtime is a different exposure. Which binary package is installed had been \
 asserted and not measured, so `tests/docker/inspect.sh` now prints the gcc and \
 libstdc++ packages and the next `docker-build-check` run answers it.
+
+Since 2026-10-08T15:17:29Z Docker Scout has stopped reporting it, which is why \
+the gate lists this entry as settled. It is kept, and the reason is not how long \
+the silence has lasted: `patchradar debian CVE-2026-95619` on 2026-10-15 still \
+reports gcc-14 no-dsa in trixie at 14.2.0-19, with the fix only in sid \
+(14.4.0-3). The package named in `where` is still unfixed in trixie and only the \
+reporting changed. Deleting a flaw that is demonstrably present because a \
+scanner fell silent is the one direction this file must not drift in.
 """
 review_by = "2026-12-31"
