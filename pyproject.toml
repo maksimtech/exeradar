@@ -158,6 +158,9 @@ also_copy = [
     # The script tests/test_release_script.py runs; behind LICENSE it was the next
     # thing the stats phase stopped on. The other Radar list it already.
     "release.sh",
+    # The attribute file tests/test_text_encoding_contract.py reads for `*.sh eol=lf`,
+    # the one after that; mailradar lists it for the same case.
+    ".gitattributes",
 ]
 # mutmut 3.8 refuses to run on Windows and points at WSL, so this is a CI-only
 # configuration: the scheduled workflow runs it on ubuntu.
