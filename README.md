@@ -39,7 +39,9 @@ The same rule applies to the file and not only to the platform. A file that
 cannot be parsed, and one whose own headers place the certificate table past the
 end of it — an interrupted download — are `unknown` too: the signature could not
 be looked for, which is not the same as finding none. Nothing is cited against
-either.
+either. On Windows the catalog check itself can fail — PowerShell missing,
+blocked or silent — and that is `unknown` as well: a file is `unsigned` only
+when Windows was asked and answered that it is not signed.
 
 ## Use
 

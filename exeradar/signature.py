@@ -123,6 +123,8 @@ def inspect(path: str | Path) -> Signature:
             detail=NOT_VERIFIABLE_HERE,
         )
 
+    # A catalog signature, or UNKNOWN when Windows could not be asked or gave an
+    # answer that settles nothing; None alone is Windows saying "not signed".
     catalog = _catalog(path)
     if catalog is not None:
         return catalog
@@ -553,16 +555,33 @@ def _catalog(path: Path) -> Signature | None:
     A subprocess rather than WinVerifyTrust through ctypes: it is the version
     that works today, and the API is the version that stops paying for a
     PowerShell start-up once batch mode makes that cost visible.
+
+    None means one thing: Windows looked and the file is not signed. Every other
+    outcome is UNKNOWN, with its reason. Failures used to be None as well, and
+    `inspect` reads None as "no catalog entry": started from PowerShell 7, whose
+    module path broke the call, exeradar called notepad.exe unsigned.
     """
     try:
         completed = _ask_powershell(path)
-        return _catalog_answer(completed.returncode, completed.stdout)
-    # ValueError is an answer that is not JSON, which `_catalog_fields` explains
-    # cannot happen; should it happen anyway, it is PowerShell not answering, as
-    # much as a PowerShell that would not start, and the honest reply to both is
-    # "I could not tell" rather than a traceback out of `analyze` or `verify`.
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return _could_not_tell(_why_powershell_failed(exc))
+    return _catalog_answer(completed.returncode, completed.stdout)
+
+
+def _why_powershell_failed(exc: OSError | subprocess.SubprocessError) -> str:
+    """What to tell the reader when PowerShell gave no answer at all."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"Windows PowerShell did not answer within {_POWERSHELL_TIMEOUT} s"
+    return f"Windows PowerShell could not be started ({exc})"
+
+
+def _could_not_tell(reason: str) -> Signature:
+    """Path B ran and reached no conclusion — which is not "no catalog entry"."""
+    return Signature(
+        state=SignatureState.UNKNOWN,
+        verified=None,
+        detail=f"catalog check could not conclude: {reason}",
+    )
 
 
 def _ask_powershell(path: Path) -> subprocess.CompletedProcess[str]:
@@ -590,27 +609,43 @@ def _ask_powershell(path: Path) -> subprocess.CompletedProcess[str]:
         'Signer="$($s.SignerCertificate.Subject)";'
         'Stamper="$($s.TimeStamperCertificate.Subject)"} | ConvertTo-Json -Compress'
     )
+    # PowerShell 7 exports a PSModulePath with its own module directory first.
+    # Windows PowerShell inherited it, found PowerShell 7's
+    # Microsoft.PowerShell.Security before its own, could not load it and exited
+    # 1 — so every catalog-signed file came out unsigned when exeradar was started
+    # from pwsh. Without the variable, Windows PowerShell builds its default path.
+    env = {name: value for name, value in os.environ.items() if name.upper() != "PSMODULEPATH"}
+    env[_TARGET_VARIABLE] = str(path)
     return subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
-        timeout=_POWERSHELL_TIMEOUT, env={**os.environ, _TARGET_VARIABLE: str(path)},
+        timeout=_POWERSHELL_TIMEOUT, env=env,
     )
 
 
 def _catalog_answer(returncode: int, stdout: str | None) -> Signature | None:
-    """What PowerShell's reply says about the file: a catalog signature, or None."""
+    """What PowerShell's reply says about the file: a catalog signature, None
+    when Windows says it is not signed, UNKNOWN for anything else."""
     if returncode != 0:
-        return None
+        return _could_not_tell(f"Windows PowerShell exited {returncode} without an answer")
     # capture_output collects the pipes on reader threads, so a decoding failure
     # there does not reach this frame as an exception: it leaves stdout as None.
     # Dereferencing that raised AttributeError, which the except in `_catalog`
     # does not cover — a crash instead of the honest "I could not tell".
     if not stdout:
-        return None
+        return _could_not_tell("Windows PowerShell gave no answer")
 
-    fields = _catalog_fields(stdout)
-    if fields["Status"] != "Valid" or fields["Type"] != "Catalog":
+    # An answer that is not JSON is one `_catalog_fields` explains cannot come
+    # with exit 0; should it come anyway, it is PowerShell not answering, and the
+    # honest reply is "I could not tell" rather than a traceback out of `analyze`.
+    try:
+        fields = _catalog_fields(stdout)
+    except ValueError:
+        return _could_not_tell("Windows PowerShell answered something that is not JSON")
+    if fields["Status"] == "NotSigned":
         return None
+    if fields["Status"] != "Valid" or fields["Type"] != "Catalog":
+        return _could_not_tell(f"Windows answered {fields['Status']}/{fields['Type']}, which path B does not resolve")
 
     return Signature(
         state=SignatureState.CATALOG,

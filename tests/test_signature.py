@@ -163,6 +163,32 @@ def test_a_catalog_signed_binary_is_not_reported_as_unsigned(catalog_pe_path):
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="path B needs Windows")
+def test_a_powershell_7_parent_does_not_make_a_catalog_file_unsigned(catalog_pe_path, monkeypatch):
+    """Started from PowerShell 7, exeradar called notepad.exe unsigned.
+
+    PowerShell 7 puts its own module directory first in PSModulePath, and the
+    Windows PowerShell that path B starts inherited it, found PowerShell 7's
+    Microsoft.PowerShell.Security first, could not load it, and exited 1 — which
+    was read as "no catalog entry". Seen on 2026-10-17: `exeradar verify
+    notepad.exe` answered `unsigned`, exit 1, from pwsh 7.6.7 and `catalog`, exit
+    0, from Git Bash, on the same machine. The variable here is the one pwsh
+    really exports, not a stand-in: its module directory has to exist.
+    """
+    import os
+
+    # Windows environment names ignore case, and os.environ holds them upper-cased.
+    modules = os.path.join(os.environ.get("PROGRAMFILES", r"C:\Program Files"), "PowerShell", "7", "Modules")
+    if not os.path.isdir(modules):
+        pytest.skip("PowerShell 7 is not installed here")
+    monkeypatch.setenv("PSMODULEPATH", os.pathsep.join([modules, os.environ.get("PSMODULEPATH", "")]))
+
+    result = signature.inspect(catalog_pe_path)
+
+    assert result.state is SignatureState.CATALOG, result.detail
+    assert result.verified is True
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="path B needs Windows")
 def test_the_catalog_path_does_not_run_when_the_file_is_embedded_signed(signed_pe_path):
     """Path A wins: there is no reason to pay for a PowerShell start-up."""
     assert signature.inspect(signed_pe_path).state is SignatureState.EMBEDDED
