@@ -112,21 +112,22 @@ def powershell(monkeypatch):
 def test_a_subject_that_failed_to_decode_is_not_dereferenced(powershell):
     """stdout is None when the reader thread could not decode the bytes.
 
-    The tool must answer "I do not know" — which is what None means here, and
-    what SignatureState.UNKNOWN exists for — rather than raise AttributeError
-    from inside a scan the user asked for.
+    The tool must answer "I do not know", which is what SignatureState.UNKNOWN
+    exists for, rather than raise AttributeError from inside a scan the user
+    asked for. It used to answer None, which `inspect` reads as "no catalog
+    entry" and reports as unsigned.
     """
     fake_run, _ = powershell
     fake_run.result = _Completed(None)
 
-    assert signature._catalog(Path("whatever.exe")) is None
+    assert signature._catalog(Path("whatever.exe")).state is SignatureState.UNKNOWN
 
 
 def test_an_empty_answer_is_not_a_valid_signature(powershell):
     fake_run, _ = powershell
     fake_run.result = _Completed("")
 
-    assert signature._catalog(Path("whatever.exe")) is None
+    assert signature._catalog(Path("whatever.exe")).state is SignatureState.UNKNOWN
 
 
 # ── the encoding ────────────────────────────────────────────────────────────
@@ -204,23 +205,38 @@ def test_a_catalog_answer_is_a_catalog_signature():
     assert found.signer == "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
 
 
-def test_a_status_other_than_valid_is_not_a_signature():
+def test_not_signed_is_the_one_answer_that_means_no_catalog_entry():
+    """None is "Windows looked and found nothing", the only reply that lets
+    `inspect` conclude UNSIGNED."""
     assert signature._catalog_fields(REPLIES["unsigned"]["stdout"])["Status"] == "NotSigned"
     assert signature._catalog_answer(*_replied("unsigned")) is None
 
 
 def test_an_embedded_signature_is_not_claimed_as_a_catalog_one():
-    """Only SignatureType Catalog belongs to path B: a valid embedded signature
-    is path A's to report."""
+    """Only SignatureType Catalog belongs to path B. Windows seeing an embedded
+    signature that path A did not report is not "no catalog entry" either: it
+    was read as None, and `inspect` would have called the file unsigned."""
     fields = signature._catalog_fields(REPLIES["embedded"]["stdout"])
-
     assert (fields["Status"], fields["Type"]) == ("Valid", "Authenticode")
-    assert signature._catalog_answer(*_replied("embedded")) is None
+
+    found = signature._catalog_answer(*_replied("embedded"))
+
+    assert found is not None and found.state is SignatureState.UNKNOWN, found
+    assert found.verified is None
+    assert "Valid/Authenticode" in found.detail
 
 
-def test_a_non_zero_exit_is_not_a_signature():
+def test_a_non_zero_exit_is_unknown_and_not_unsigned():
+    """Exit 1 is PowerShell not answering: no such file, access denied, or the
+    module it needs not loading under PowerShell 7's PSModulePath. It was read
+    as "no catalog entry", and `inspect` then called notepad.exe unsigned."""
     assert REPLIES["missing"]["returncode"] != 0
-    assert signature._catalog_answer(*_replied("missing")) is None
+
+    found = signature._catalog_answer(*_replied("missing"))
+
+    assert found is not None and found.state is SignatureState.UNKNOWN, found
+    assert found.verified is None
+    assert "could not" in found.detail
 
 
 @windows_only
@@ -359,8 +375,9 @@ def test_exit_0_is_always_one_json_object(kind, request, tmp_path):
     answer = json.loads(completed.stdout)
     assert isinstance(answer, dict) and list(answer) == _FIELDS, completed.stdout
     found = signature._catalog(target)
-    assert (found is not None) is (kind == "catalog"), found
-    if found is not None:
+    claimed = found is not None and found.state is SignatureState.CATALOG
+    assert claimed is (kind == "catalog"), found
+    if claimed:
         assert found.signer and found.signer.startswith("CN=Microsoft Windows"), found.signer
 
 
@@ -380,7 +397,7 @@ def test_every_failure_is_a_non_zero_exit_with_nothing_on_stdout(kind, request, 
     assert completed.returncode != 0
     assert completed.stdout == ""
     assert completed.stderr
-    assert signature._catalog(target) is None
+    assert signature._catalog(target).state is SignatureState.UNKNOWN
 
 
 def test_no_powershell_is_no_answer(unsigned_pe_path):
@@ -389,4 +406,4 @@ def test_no_powershell_is_no_answer(unsigned_pe_path):
     if shutil.which("powershell"):
         pytest.skip("PowerShell is installed here")
 
-    assert signature._catalog(unsigned_pe_path) is None
+    assert signature._catalog(unsigned_pe_path).state is SignatureState.UNKNOWN
