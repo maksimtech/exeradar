@@ -52,6 +52,17 @@ no version in this file has ever matched — 40 is not a month, and
   exit 2; a changed byte is still `bad_digest`, and only it is reported as "the file does not match
   what was signed" — another failure now reads "the signature does not verify". Found among 1,500
   PE files compared with `Get-AuthenticodeSignature` on 2026-10-17.
+- **Started from PowerShell 7, every catalog-signed file was reported unsigned.** `exeradar verify
+  C:\Windows\System32\notepad.exe` answered `unsigned`, exit 1, and `analyze` cited CRA Annex I,
+  CRA art. 13(1), NIS2 art. 21(2)(d) and GDPR art. 32(1) against it, from pwsh 7.6.7. The same
+  command from Git Bash said `catalog`. The Windows PowerShell that path B starts inherited pwsh's
+  PSModulePath, found PowerShell 7's `Microsoft.PowerShell.Security` first, could not load it and
+  exited 1, and that failure was read as "no catalog entry". The variable is no longer passed on.
+  Underneath it was a wider rule broken: any failure of path B — PowerShell missing, timing out,
+  exiting non-zero, answering nothing, or answering anything but `NotSigned` or a valid catalog
+  signature — became UNSIGNED. It is now UNKNOWN with the reason (`catalog check could not
+  conclude: …`), which cites nothing and makes `verify` exit 2; only Windows saying `NotSigned`
+  leads to `unsigned`. From pwsh the suite went from 29 failures to the 16 environmental ones.
 - **On a pull request, Security Posture called live exceptions unused.** CodeQL reports only what
   the change introduces on a pull request ref, so when it reported anything, an exception for a
   finding still open on main in an untouched file matched nothing and failed the gate
