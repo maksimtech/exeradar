@@ -273,6 +273,25 @@ def _verdict(flags) -> tuple[bool | None, tuple[str, ...]]:
     return None, names
 
 
+def _verification(binary) -> int:
+    """LIEF's answer about the first signature, assembled from its two parts.
+
+    `verify_signature()` adds BAD_SIGNATURE whenever the signature check did not
+    pass, for whatever reason: a certificate it could not find or that had
+    expired came back as CERT_NOT_FOUND|BAD_SIGNATURE or BAD_SIGNATURE|CERT_EXPIRED,
+    and BAD_SIGNATURE made a file Windows validates `signature_invalid`, severity
+    high — Steam's WriteMiniDump.exe and ASMedia's Usb4HR64.sys, whose digests
+    are the ones signed (measured with LIEF 1.0.0 on 2026-10-17). So the digest is
+    asked alone, and only its BAD_DIGEST kept: HASH_ONLY on a changed file says
+    BAD_SIGNATURE as well, while the signature itself checks out. The signature's
+    own flags come from `Signature.check()`, which sets BAD_SIGNATURE only when the
+    signature does not verify.
+    """
+    digest = binary.verify_signature(lief.PE.Signature.VERIFICATION_CHECKS.HASH_ONLY)
+    bad_digest = int(lief.PE.Signature.VERIFICATION_FLAGS.BAD_DIGEST)
+    return (int(digest) & bad_digest) | int(binary.signatures[0].check())
+
+
 def _embedded(path: Path) -> Signature | None:
     try:
         binary = pe.parse(path)
@@ -284,7 +303,7 @@ def _embedded(path: Path) -> Signature | None:
     signature = binary.signatures[0]
     chain = _chain(signature, _signer_serial(signature))
     stamp, stamper, problem = _timestamp(path)
-    verified, flags = _verdict(binary.verify_signature())
+    verified, flags = _verdict(_verification(binary))
 
     detail = f"embedded {signature.digest_algorithm}".replace("ALGORITHMS.", "")
     if verified is None:

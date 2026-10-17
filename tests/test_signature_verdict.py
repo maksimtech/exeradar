@@ -126,6 +126,71 @@ def test_the_committed_sample_matches_its_signature(signed_pe_path):
     assert found.verification == ("ok",)
 
 
+def _with_signer_serial_changed(signed_pe_path, tmp_path):
+    """The sample with one byte of the signer's serial changed where SignerInfo
+    names it, and nowhere else. Derived data: the certificate itself and every
+    signed byte are as recorded, so the blob no longer points at the certificate
+    it carries — the case of Steam's WriteMiniDump.exe, whose one certificate LIEF
+    1.0.0 could not parse."""
+    data = signed_pe_path.read_bytes()
+    serial = bytes(lief.PE.parse(str(signed_pe_path)).signatures[0].signers[0].serial_number)
+    assert data.count(serial) == 2, "the serial is in the certificate and in SignerInfo"
+    changed = bytearray(data)
+    changed[data.rfind(serial) + len(serial) - 1] ^= 0x01
+    target = tmp_path / "signer_not_found.exe"
+    target.write_bytes(bytes(changed))
+    return target
+
+
+def test_a_signer_certificate_that_cannot_be_found_is_not_a_bad_signature(signed_pe_path, tmp_path):
+    """LIEF's `verify_signature()` adds BAD_SIGNATURE whenever the signature check
+    did not pass, for whatever reason. With the signer's certificate missing it
+    answered CERT_NOT_FOUND|BAD_SIGNATURE, which `_verdict` read as "not valid"
+    and law_checker turned into `signature_invalid`, severity high — for
+    WriteMiniDump.exe, which Windows and signtool validate, and whose digest is
+    the one signed. Nothing was found wrong; the check could not be made."""
+    found = signature.inspect(_with_signer_serial_changed(signed_pe_path, tmp_path))
+
+    assert found.verified is None, found.verification
+    assert "cert_not_found" in found.verification
+    assert "bad_signature" not in found.verification
+
+
+def test_a_changed_byte_is_still_a_file_that_does_not_match(signed_pe_path, tmp_path):
+    """The other side of the case above: when the bytes are not the bytes that
+    were signed, that is still said, by the flag that means it."""
+    data = bytearray(signed_pe_path.read_bytes())
+    data[0x500] ^= 0xFF
+    tampered = tmp_path / "tampered.exe"
+    tampered.write_bytes(bytes(data))
+
+    found = signature.inspect(tampered)
+
+    assert found.verified is False
+    assert found.verification == ("bad_digest",)
+
+
+# Files on this machine that Windows validates and LIEF 1.0.0 called not valid,
+# found by comparing 1,500 PE files with Get-AuthenticodeSignature on 2026-10-17.
+# Not redistributable, so they are asked where they exist and skipped elsewhere.
+WINDOWS_VALIDATES = [
+    r"C:\Program Files (x86)\Steam\WriteMiniDump.exe",       # CERT_NOT_FOUND|BAD_SIGNATURE
+    r"C:\Windows\System32\drivers\Usb4HR64.sys",             # BAD_SIGNATURE|CERT_EXPIRED, not timestamped
+]
+
+
+@pytest.mark.parametrize("path", WINDOWS_VALIDATES)
+def test_a_file_windows_validates_is_not_called_invalid(path):
+    import os
+
+    if not os.path.isfile(path):
+        pytest.skip(f"{path} is not on this machine")
+
+    found = signature.inspect(path)
+
+    assert found.verified is not False, found.verification
+
+
 def test_a_signature_that_is_there_and_unreadable_is_not_an_absent_one(signed_pe_path, tmp_path):
     """The bytes of the blob replaced, the certificate table left in place.
 
@@ -195,6 +260,16 @@ def test_the_sentence_for_a_mismatch_says_which_flag():
 
     assert "does not match what was signed" in sentence
     assert "bad_digest" in sentence
+
+
+def test_a_failure_that_is_not_the_digest_does_not_say_the_bytes_changed():
+    """BAD_SIGNATURE is the signature over the signed attributes not verifying;
+    the file may well be exactly what was signed. Only BAD_DIGEST says it is not."""
+    sentence = report.signature_sentence(_embedded(False, ("bad_signature",)))
+
+    assert "does not match what was signed" not in sentence
+    assert "does not verify" in sentence
+    assert "bad_signature" in sentence
 
 
 def test_the_sentence_for_an_undetermined_check_accuses_nobody():
