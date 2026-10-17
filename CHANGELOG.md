@@ -41,6 +41,17 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A certificate LIEF could not find or that had expired made a valid file `signature_invalid`.**
+  LIEF's `verify_signature()` adds BAD_SIGNATURE whenever the signature check does not pass, for
+  any reason, and BAD_SIGNATURE is read as "not valid": Steam's WriteMiniDump.exe
+  (CERT_NOT_FOUND|BAD_SIGNATURE, its one certificate unparsed by LIEF 1.0.0) and ASMedia's
+  Usb4HR64.sys (BAD_SIGNATURE|CERT_EXPIRED, not timestamped) got the high finding and its
+  citations, although Windows and signtool validate both and their digests are the ones signed.
+  The verdict is now assembled from its parts: the digest alone (HASH_ONLY, keeping BAD_DIGEST) and
+  the signature's own flags (`Signature.check()`). Both files are now "not checked to a conclusion",
+  exit 2; a changed byte is still `bad_digest`, and only it is reported as "the file does not match
+  what was signed" — another failure now reads "the signature does not verify". Found among 1,500
+  PE files compared with `Get-AuthenticodeSignature` on 2026-10-17.
 - **On a pull request, Security Posture called live exceptions unused.** CodeQL reports only what
   the change introduces on a pull request ref, so when it reported anything, an exception for a
   finding still open on main in an untouched file matched nothing and failed the gate

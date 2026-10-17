@@ -556,10 +556,13 @@ def signature_sentence(signature: Signature) -> str:
         if signature.verified is True:
             return "Embedded Authenticode signature; the file matches what was signed."
         if signature.verified is False:
-            return (
-                "Embedded Authenticode signature, and the file does not match what was "
-                f"signed ({', '.join(signature.verification) or 'no reason reported'})."
-            )
+            reason = ", ".join(signature.verification) or "no reason reported"
+            # Only BAD_DIGEST says the bytes changed. The other failures are about
+            # the signature or its structure, on a file that may be exactly the
+            # one signed.
+            if "bad_digest" in signature.verification:
+                return f"Embedded Authenticode signature, and the file does not match what was signed ({reason})."
+            return f"Embedded Authenticode signature, and the signature does not verify ({reason})."
         return (
             "Embedded Authenticode signature, not checked to a conclusion "
             f"({', '.join(signature.verification) or 'no reason reported'})."
