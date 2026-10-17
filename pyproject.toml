@@ -155,6 +155,9 @@ also_copy = [
     # The licence file pyproject names, which tests/test_declared_files.py looks for:
     # without it the runs of 2026-10-10 and 2026-10-17 stopped in the stats phase.
     "LICENSE",
+    # The script tests/test_release_script.py runs; behind LICENSE it was the next
+    # thing the stats phase stopped on. The other Radar list it already.
+    "release.sh",
 ]
 # mutmut 3.8 refuses to run on Windows and points at WSL, so this is a CI-only
 # configuration: the scheduled workflow runs it on ubuntu.
