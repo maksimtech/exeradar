@@ -89,6 +89,28 @@ def test_the_mutation_run_skips_them_as_well():
     assert "--ignore=tests/benchmarks" in config.split("[tool.mutmut]", 1)[1]
 
 
+def test_without_their_runner_they_are_skipped_not_errors():
+    """The two tests above hold the workflows to `--ignore`; nothing held a plain
+    `pytest`. `testpaths` is `["tests"]`, which contains tests/benchmarks, and
+    `release.sh` runs `python3 -m pytest -q` before it commits the bump: on
+    2026-10-17, ahead of 2026.44, that ended in `fixture 'benchmark' not found`
+    errors, and the release stopped. Without the runner they are skipped and say
+    why, as in cookieradar and releaseradar; `-p no:codspeed` stands in for the
+    missing runner where it is installed."""
+    import subprocess
+    import sys
+
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "tests/benchmarks", "-q", "-rs",
+         "-p", "no:codspeed", "-p", "no:cacheprovider"],
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120,
+    )
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert re.search(r"\b\d+ skipped\b", done.stdout), done.stdout
+    assert "codspeed" in done.stdout.lower(), "the skip reason must name the runner"
+
+
 def test_the_runner_is_not_a_project_dependency():
     """pytest-codspeed is installed by codspeed.yml and nowhere else, as in the
     other three. Declaring it would put a benchmark tool in the way of finding

@@ -1,10 +1,16 @@
 """Fixtures for the benchmarks.
 
-They live here rather than in tests/conftest.py on purpose: this directory sits
-outside `testpaths`, so the ordinary suite never collects it and never needs
-pytest-codspeed installed. The price is that the two conftests do not share, and
-that is the right price — a benchmark that silently starts measuring a fixture
-the test suite changed for its own reasons is measuring the wrong thing.
+They live here rather than in tests/conftest.py on purpose. The price is that
+the two conftests do not share, and that is the right price — a benchmark that
+silently starts measuring a fixture the test suite changed for its own reasons
+is measuring the wrong thing.
+
+This directory is inside `testpaths`, whatever this docstring said until
+2026-10-17: the workflows pass `--ignore=tests/benchmarks`, but a plain `pytest`,
+the one release.sh runs before committing the bump, collected it and ended in
+`fixture 'benchmark' not found`. The runner is installed by codspeed.yml alone,
+so without it the benchmarks are skipped and say why, as in cookieradar and
+releaseradar.
 
 Everything is session-scoped and read once. A benchmark that re-reads 100 KB
 from disk on every round reports the speed of the page cache.
@@ -17,6 +23,15 @@ from pathlib import Path
 import pytest
 
 from exeradar import scanner, signature, strings
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.pluginmanager.hasplugin("codspeed"):
+        return
+    skip = pytest.mark.skip(reason="the CodSpeed runner is not installed: codspeed.yml runs the benchmarks")
+    for item in items:
+        if "benchmark" in getattr(item, "fixturenames", ()):
+            item.add_marker(skip)
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "python.exe"
 
