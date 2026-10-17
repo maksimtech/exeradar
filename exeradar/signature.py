@@ -563,18 +563,16 @@ def _catalog(path: Path) -> Signature | None:
     """
     try:
         completed = _ask_powershell(path)
-    except subprocess.TimeoutExpired:
-        return _could_not_tell(f"Windows PowerShell did not answer within {_POWERSHELL_TIMEOUT} s")
     except (OSError, subprocess.SubprocessError) as exc:
-        return _could_not_tell(f"Windows PowerShell could not be started ({exc})")
-    # ValueError is an answer that is not JSON, which `_catalog_fields` explains
-    # cannot happen; should it happen anyway, it is PowerShell not answering, and
-    # the honest reply is "I could not tell" rather than a traceback out of
-    # `analyze` or `verify`.
-    try:
-        return _catalog_answer(completed.returncode, completed.stdout)
-    except ValueError:
-        return _could_not_tell("Windows PowerShell answered something that is not JSON")
+        return _could_not_tell(_why_powershell_failed(exc))
+    return _catalog_answer(completed.returncode, completed.stdout)
+
+
+def _why_powershell_failed(exc: OSError | subprocess.SubprocessError) -> str:
+    """What to tell the reader when PowerShell gave no answer at all."""
+    if isinstance(exc, subprocess.TimeoutExpired):
+        return f"Windows PowerShell did not answer within {_POWERSHELL_TIMEOUT} s"
+    return f"Windows PowerShell could not be started ({exc})"
 
 
 def _could_not_tell(reason: str) -> Signature:
@@ -637,7 +635,13 @@ def _catalog_answer(returncode: int, stdout: str | None) -> Signature | None:
     if not stdout:
         return _could_not_tell("Windows PowerShell gave no answer")
 
-    fields = _catalog_fields(stdout)
+    # An answer that is not JSON is one `_catalog_fields` explains cannot come
+    # with exit 0; should it come anyway, it is PowerShell not answering, and the
+    # honest reply is "I could not tell" rather than a traceback out of `analyze`.
+    try:
+        fields = _catalog_fields(stdout)
+    except ValueError:
+        return _could_not_tell("Windows PowerShell answered something that is not JSON")
     if fields["Status"] == "NotSigned":
         return None
     if fields["Status"] != "Valid" or fields["Type"] != "Catalog":

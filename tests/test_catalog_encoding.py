@@ -226,6 +226,24 @@ def test_an_embedded_signature_is_not_claimed_as_a_catalog_one():
     assert "Valid/Authenticode" in found.detail
 
 
+def test_a_powershell_that_does_not_answer_in_time_is_named_as_such():
+    """A timeout is PowerShell not answering, and the reader is told so rather
+    than shown the exception. The exception is a real one, as `run` raises it."""
+    reason = signature._why_powershell_failed(subprocess.TimeoutExpired(["powershell"], 60))
+
+    assert f"did not answer within {signature._POWERSHELL_TIMEOUT} s" in reason
+
+
+def test_an_answer_that_is_not_json_is_unknown():
+    """Derived, not recorded: `_catalog_fields` explains why exit 0 is always one
+    JSON object. Should that ever stop being true, the answer is "I could not
+    tell", not a traceback and not "no catalog entry"."""
+    found = signature._catalog_answer(0, "Get-AuthenticodeSignature : something else\r\n")
+
+    assert found is not None and found.state is SignatureState.UNKNOWN, found
+    assert "not JSON" in found.detail
+
+
 def test_a_non_zero_exit_is_unknown_and_not_unsigned():
     """Exit 1 is PowerShell not answering: no such file, access denied, or the
     module it needs not loading under PowerShell 7's PSModulePath. It was read
