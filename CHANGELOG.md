@@ -12,6 +12,8 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+## [2026.44] - 2026-10-17
+
 ### Added
 
 - **`docs/nis2-compliance.md`: the answers to the seven questions a customer subject to NIS2
@@ -121,7 +123,6 @@ no version in this file has ever matched — 40 is not a month, and
   opens the pull request with auto-merge, waits for the merge and tags the merge commit.
   `./release.sh --tag X` is that last step alone. The guarantees stay: nothing is committed when
   the suite fails, and the tag is made before anything is pushed. Ported from mailradar.
-
 
 ## [2026.43] - 2026-10-10
 
@@ -1151,7 +1152,8 @@ signing, and the legal provisions the findings concern.
   `LibraryNotFoundError`.
 - Requires Python 3.11 or later; tested on 3.11, 3.12, 3.13 and 3.14.
 
-[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.43...HEAD
+[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.44...HEAD
+[2026.44]: https://github.com/maksimtech/exeradar/compare/v2026.43...v2026.44
 [2026.43]: https://github.com/maksimtech/exeradar/compare/v2026.42...v2026.43
 [2026.42]: https://github.com/maksimtech/exeradar/releases/tag/v2026.42
 [2026.41]: https://github.com/maksimtech/exeradar/releases/tag/v2026.41
