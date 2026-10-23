@@ -19,6 +19,19 @@ no version in this file has ever matched — 40 is not a month, and
   2026.10.19 is the release the advisory names as fixed. The Security Posture gate stopped every pull
   request on it.
 
+### Fixed
+
+- **An unsigned binary, an invalid signature and known vulnerabilities now cite art. 24(2)(d) and
+  24(2)(e) of d.lgs. 138/2024, not art. 21(2)(d) and (e) of the NIS2 directive.** The directive binds
+  the Member States; in Italy the duty of essential and important entities to take security measures is
+  art. 24 of the decree that transposes it, with the same letters: (d) supply chain security, (e)
+  security in acquisition, development and maintenance, vulnerability handling included. The text is
+  downloaded from Normattiva; the scope note points to art. 3 of the decree and comes with it.
+  ARCHITECTURE.md's mapping table says the same.
+- **The law check records the source a verified text came from** (Cellar, the EUR-Lex fallback or
+  Normattiva), as the other Radar tools now print it; `law_checker.check` takes an optional HTTP
+  client, so the path is tested on recorded answers.
+
 ## [2026.44] - 2026-10-17
 
 ### Added
