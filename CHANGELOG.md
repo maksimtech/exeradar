@@ -12,6 +12,8 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+## [2026.45] - 2026-10-23
+
 ### Security
 
 - **certifi 2026.10.19** in `uv.lock`, from 2026.7.22. The older bundle trusts emSign root CAs whose
@@ -1172,7 +1174,8 @@ signing, and the legal provisions the findings concern.
   `LibraryNotFoundError`.
 - Requires Python 3.11 or later; tested on 3.11, 3.12, 3.13 and 3.14.
 
-[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.44...HEAD
+[Unreleased]: https://github.com/maksimtech/exeradar/compare/v2026.45...HEAD
+[2026.45]: https://github.com/maksimtech/exeradar/compare/v2026.44...v2026.45
 [2026.44]: https://github.com/maksimtech/exeradar/compare/v2026.43...v2026.44
 [2026.43]: https://github.com/maksimtech/exeradar/compare/v2026.42...v2026.43
 [2026.42]: https://github.com/maksimtech/exeradar/releases/tag/v2026.42
