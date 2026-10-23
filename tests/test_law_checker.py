@@ -32,7 +32,7 @@ from exeradar.law_checker import (
     format_citation,
     notes_of,
 )
-from exeradar.law_fetcher import CRA, GDPR, NIS2, LawFetchError, Provision
+from exeradar.law_fetcher import CRA, DLGS_138_2024, GDPR, LawFetchError, Provision
 from exeradar.models import (
     Certificate,
     ExeResult,
@@ -49,7 +49,7 @@ PART_I = "Allegato I, Parte I"
 ACT_FIXTURES = {
     CRA: "cra_it_excerpt.html",
     GDPR: "gdpr_it_excerpt.html",
-    NIS2: "nis2_it_excerpt.html",
+    DLGS_138_2024: "normattiva_dlgs138_2024_art24_recorded.html",
 }
 
 
@@ -105,15 +105,15 @@ def cert(valid_to, valid_from="2020-01-01 00:00:00") -> Certificate:
 def test_mapping():
     assert FINDING_ARTICLES == {
         "unsigned": ((CRA, PART_I + "(2)(f)"), (CRA, "13(1)"),
-                     (NIS2, "21(2)(d)"), (GDPR, "32(1)")),
+                     (DLGS_138_2024, "24(2)(d)"), (GDPR, "32(1)")),
         "signature_invalid": ((CRA, PART_I + "(2)(f)"), (CRA, "13(1)"),
-                              (NIS2, "21(2)(d)"), (GDPR, "32(1)")),
+                              (DLGS_138_2024, "24(2)(d)"), (GDPR, "32(1)")),
         "certificate_expired": ((CRA, PART_I + "(2)(f)"), (GDPR, "32(1)")),
         "hardcoded_ip": ((CRA, PART_I + "(2)(j)"),),
         "known_vulnerabilities": ((CRA, PART_I + "(2)(a)"),
                                   (CRA, "Allegato I, Parte II(1)"),
                                   (CRA, "Allegato I, Parte II(2)"),
-                                  (NIS2, "21(2)(e)")),
+                                  (DLGS_138_2024, "24(2)(e)")),
     }
     assert set(FINDING_TITLES) == set(FINDING_ARTICLES)
 
@@ -334,7 +334,7 @@ def test_the_nis2_and_gdpr_notes_state_whom_those_acts_bind():
 
 
 def test_a_note_is_only_added_for_an_act_that_is_actually_cited():
-    """A hardcoded address cites the CRA alone; NIS2 has nothing to do with it."""
+    """A hardcoded address cites the CRA alone; the NIS2 decree has nothing to do with it."""
     notes = " ".join(notes_of(result(ips=["203.0.113.7"], imports=SOCKETS), now=NOW))
     assert "essential and important entities" not in notes
     assert "2027" in notes
@@ -366,7 +366,7 @@ def _fake_fetch(suffix=""):
         return {
             ref: Provision.from_text(ref, f"{act.name} {ref}{suffix}", stamp, act.celex)
             for ref in refs if ref.split("(")[0] in articles
-        }
+        }, "Cellar"
 
     fake.calls = calls
     return fake
@@ -380,7 +380,7 @@ def cache(tmp_path):
 @pytest.fixture
 def online(monkeypatch):
     fake = _fake_fetch()
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", fake)
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", fake)
     return fake.calls
 
 
@@ -394,7 +394,7 @@ def test_every_cited_provision_carries_its_hash_and_date(cache, online):
     outcome = check(result(state=SignatureState.UNSIGNED, verified=False), cache=cache, now=NOW)
 
     assert [c.article for c in outcome.citations] == [
-        PART_I + "(2)(f)", "13(1)", "21(2)(d)", "32(1)",
+        PART_I + "(2)(f)", "13(1)", "24(2)(d)", "32(1)",
     ]
     for citation in outcome.citations:
         assert citation.finding == "unsigned"
@@ -417,13 +417,13 @@ def test_the_evidence_travels_with_the_citations(cache, online):
 
 
 def test_an_act_that_cannot_be_reached_is_cited_from_the_cache(cache, monkeypatch):
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch())
     first = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     def unreachable(act, articles, now=None, **kwargs):
         raise LawFetchError("Cellar answered HTTP 202; and EUR-Lex answered HTTP 202")
 
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", unreachable)
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", unreachable)
     second = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert [c.sha256 for c in second.citations] == [c.sha256 for c in first.citations]
@@ -436,7 +436,7 @@ def test_an_act_reachable_by_neither_route_is_cited_without_a_hash(cache, monkey
     def unreachable(act, articles, now=None, **kwargs):
         raise LawFetchError("unreachable")
 
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", unreachable)
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", unreachable)
     outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert outcome.citations[0].sha256 is None
@@ -444,10 +444,10 @@ def test_an_act_reachable_by_neither_route_is_cited_without_a_hash(cache, monkey
 
 
 def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypatch):
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch())
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch())
     check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
-    monkeypatch.setattr(law_fetcher, "fetch_provisions", _fake_fetch(" amended"))
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch(" amended"))
     outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
 
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]

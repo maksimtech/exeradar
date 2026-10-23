@@ -39,9 +39,11 @@ import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+import httpx
+
 from exeradar import law_fetcher
 from exeradar.law_cache import Key, LawCache
-from exeradar.law_fetcher import CRA, GDPR, NIS2, Act, LawFetchError, Provision
+from exeradar.law_fetcher import CRA, DLGS_138_2024, GDPR, Act, LawFetchError, Provision
 from exeradar.models import ExeResult, Finding, SignatureState
 
 # ─── Mapping: ExeRadar findings → provisions ──────────────────────────────────
@@ -65,13 +67,13 @@ _PART_II = "Allegato I, Parte II"
 # finding carries a note saying so, and why nothing else is cited for it.
 FINDING_ARTICLES: dict[str, tuple[tuple[Act, str], ...]] = {
     "unsigned": ((CRA, f"{_PART_I}(2)(f)"), (CRA, "13(1)"),
-                 (NIS2, "21(2)(d)"), (GDPR, "32(1)")),
+                 (DLGS_138_2024, "24(2)(d)"), (GDPR, "32(1)")),
     "signature_invalid": ((CRA, f"{_PART_I}(2)(f)"), (CRA, "13(1)"),
-                          (NIS2, "21(2)(d)"), (GDPR, "32(1)")),
+                          (DLGS_138_2024, "24(2)(d)"), (GDPR, "32(1)")),
     "certificate_expired": ((CRA, f"{_PART_I}(2)(f)"), (GDPR, "32(1)")),
     "hardcoded_ip": ((CRA, f"{_PART_I}(2)(j)"),),
     "known_vulnerabilities": ((CRA, f"{_PART_I}(2)(a)"), (CRA, f"{_PART_II}(1)"),
-                              (CRA, f"{_PART_II}(2)"), (NIS2, "21(2)(e)")),
+                              (CRA, f"{_PART_II}(2)"), (DLGS_138_2024, "24(2)(e)")),
 }
 
 FINDING_TITLES = {
@@ -101,7 +103,7 @@ CRA_SCOPE_NOTE = (
     "file and cannot establish which product it is part of"
 )
 NIS2_SCOPE_NOTE = (
-    "NIS2 art. 21 binds essential and important entities (art. 3 of the directive): "
+    "D.Lgs. 138/2024 art. 24 binds essential and important entities (art. 3 of the decree): "
     "check that the organisation falls within scope"
 )
 GDPR_SCOPE_NOTE = (
@@ -305,7 +307,7 @@ def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
     acts = {act for finding in found for act, _ in FINDING_ARTICLES[finding]}
     if CRA in acts:
         notes += [CRA_APPLICATION_NOTE, CRA_SCOPE_NOTE]
-    if NIS2 in acts:
+    if DLGS_138_2024 in acts:
         notes.append(NIS2_SCOPE_NOTE)
     if GDPR in acts:
         notes.append(GDPR_SCOPE_NOTE)
@@ -336,6 +338,8 @@ class ActStatus:
     # unreachable, cached copy; "unavailable": no text at all
     source: str
     error: str | None = None
+    # Where a verified text came from: "Cellar", "EUR-Lex" (the fallback) or "Normattiva"; None otherwise
+    origin: str | None = None
 
 
 @dataclass
@@ -357,11 +361,14 @@ def check(
     cache: LawCache | None = None,
     now: datetime | None = None,
     offline: bool = False,
+    client: httpx.Client | None = None,
 ) -> LawCheckResult:
     """Cite the provisions that apply to the findings about `subject`.
 
     `offline` cites from the local cache without downloading anything, and an
     act that is not cached is cited without a hash rather than with a guess.
+    `client` is the HTTP client for the downloads (tests pass one that answers
+    from recordings); by default law_fetcher opens its own.
 
     It used to take `**context` and hand it to `findings_of` and `notes_of`,
     neither of which accepts anything more, so any extra argument ended in a
@@ -384,6 +391,7 @@ def check(
     # Keyed by (celex, article) — the cache's key, not the fetcher's.
     fresh: dict[Key, Provision] = {}
     errors: dict[Act, str] = {}
+    origins: dict[Act, str] = {}
     for act in acts:
         # The units cited — "13" is the article behind "13(1)", "Allegato I,
         # Parte I" the annex part behind its points — plus ALSO_FETCH
@@ -394,7 +402,7 @@ def check(
             errors[act] = "offline: the text was not downloaded"
             continue
         try:
-            by_article = law_fetcher.fetch_provisions(act, articles, now=now)
+            by_article, origins[act] = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
         except LawFetchError as e:
             errors[act] = str(e)
         else:
@@ -412,7 +420,7 @@ def check(
     statuses = []
     for act in acts:
         if act not in errors:
-            statuses.append(ActStatus(act, "verified"))
+            statuses.append(ActStatus(act, "verified", origin=origins[act]))
         else:
             cached = any((act.celex, ref) in provisions for _, a, ref in cited if a == act)
             statuses.append(ActStatus(act, "cache" if cached else "unavailable", errors[act]))

@@ -203,11 +203,11 @@ they take the same route.
 
 | Finding | Cited |
 | --- | --- |
-| `unsigned` | CRA Annex I, Part I(2)(f); CRA art. 13(1); NIS2 art. 21(2)(d); GDPR art. 32(1) |
+| `unsigned` | CRA Annex I, Part I(2)(f); CRA art. 13(1); d.lgs. 138/2024 art. 24(2)(d); GDPR art. 32(1) |
 | `signature_invalid` | the same four |
 | `certificate_expired` | CRA Annex I, Part I(2)(f); GDPR art. 32(1) |
 | `hardcoded_ip` | CRA Annex I, Part I(2)(j) |
-| `known_vulnerabilities` *(not produced yet)* | CRA Annex I, Part I(2)(a), Part II(1) and (2); NIS2 art. 21(2)(e) |
+| `known_vulnerabilities` *(not produced yet)* | CRA Annex I, Part I(2)(a), Part II(1) and (2); d.lgs. 138/2024 art. 24(2)(e) |
 
 Four refusals are as much a part of the design as the citations.
 

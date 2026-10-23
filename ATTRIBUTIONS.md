@@ -70,6 +70,14 @@ The markup inside each file is the document's own: the excerpt is a slice, not
 a reconstruction, so a test that passes against it is a test against the real
 rendering.
 
+## `tests/fixtures/normattiva_dlgs138_2024_art24_recorded.html` — Italian law
+
+Normattiva's whole answer to
+`https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2024-09-04;138~art24!vig=`
+(d.lgs. 138/2024, art. 24, the provision the signature and vulnerability findings cite), recorded byte for
+byte on 2026-10-23 at 15:53 UTC (sha256 `3a2ace83cd631b149fcb30626d3a3507d8fd7e3b1b811f9a71f5b5ee7690ee76`,
+the same at 15:52). The text of a law is not protected by copyright in Italy (art. 5, l. 633/1941).
+
 Reuse of Commission documents is governed by Decision 2011/833/EU, which
 permits reuse — including for commercial purposes — provided the source is
 acknowledged and the meaning is not distorted. Only the authentic text
