@@ -12,6 +12,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Security
+
+- **certifi 2026.10.19** in `uv.lock`, from 2026.7.22. The older bundle trusts emSign root CAs whose
+  intermediate CA keys were compromised (GHSA-6q48-6c7w-9gw2, critical, published 2026-10-20);
+  2026.10.19 is the release the advisory names as fixed. The Security Posture gate stopped every pull
+  request on it.
+
 ### Fixed
 
 - **An unsigned binary, an invalid signature and known vulnerabilities now cite art. 24(2)(d) and
