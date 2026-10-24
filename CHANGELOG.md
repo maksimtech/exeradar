@@ -12,6 +12,15 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docker Scout scans the image as soon as it is published, and Security Posture reads that scan.**
+  The scan reads `latest` from Docker Hub but ran only on a push to main, weekly or by hand: after the
+  certifi release the gate stayed red on the replaced image until both were dispatched by hand.
+  `docker-scout.yml` now follows the image workflow (`workflow_run`, successful runs only) and
+  `security-posture.yml` follows the scan. `docs/nis2-compliance.md` now says so, and `tests/test_scan_after_publish.py`
+  holds them together.
+
 ## [2026.45] - 2026-10-23
 
 ### Security

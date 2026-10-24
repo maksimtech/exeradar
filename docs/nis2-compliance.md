@@ -97,7 +97,7 @@ Analisi automatiche, ciascuna con il proprio workflow in `.github/workflows`:
 | `Trivy` | vulnerabilità note nei file del repository | ogni pull request, ogni push su `main`, ogni settimana |
 | `Snyk` | vulnerabilità note nelle dipendenze | ogni pull request, ogni push su `main` |
 | `SonarCloud` | qualità, duplicazioni e copertura | ogni pull request, ogni push su `main` |
-| `Docker Scout` | vulnerabilità note nell'immagine | ogni push su `main`, ogni settimana |
+| `Docker Scout` | vulnerabilità note nell'immagine | ogni push su `main`, ogni build dell'immagine, ogni settimana |
 | `Security Posture` | raccoglie gli avvisi pubblicati dagli altri e fallisce se un avviso alto o critico non ha un'eccezione motivata | ogni pull request, ogni push su `main`, ogni settimana |
 | `CodSpeed` | prestazioni: esegue i benchmark del repository e pubblica sulla pull request il confronto con `main`; non blocca il merge | ogni pull request che tocca codice, test o `pyproject.toml`, ogni push su `main` |
 | `mutmut` | mutation testing: verifica che i test si accorgano delle modifiche al codice | ogni settimana |
