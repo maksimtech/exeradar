@@ -54,7 +54,7 @@ dpkg-query -W -f '${Package} ${Version} essential=${Essential} priority=${Priori
 
 echo
 echo "── the C++ toolchain, or only its runtime ──"
-# Snyk reports CVE-2026-102010 and CVE-2026-95619 against the *source* package
+# The scanners report CVE-2026-102010 and CVE-2026-95619 against the *source* package
 # gcc-14, and Debian's gcc source produces both the compiler and libstdc++6, the
 # runtime that LIEF is built against. Those are not the same exposure: a flaw in
 # cc1 needs something to compile, and nothing in this image compiles anything.
