@@ -67,6 +67,7 @@ jobs:
       # workflow_dispatch from a branch skipped it and published whatever that
       # branch held; dispatched from a tag, a rebuild still works.
       - name: Check the tag matches the package version
+        id: version
         run: |
           VERSION=$(python -c "from exeradar import __version__; print(__version__)")
           if [ "$GITHUB_REF_TYPE" != "tag" ]; then
@@ -77,6 +78,7 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match package version $VERSION"
             exit 1
           fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Install build dependencies
         run: pip install --upgrade build hatchling  # NOSONAR - trusted packages
@@ -88,3 +90,17 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           verify-metadata: false
+
+      # Nothing proved that what lands on PyPI can be installed: the image builds
+      # from the tag's source and never asks the index. The other five Radar check
+      # it here, after the upload, and so does this one now. The install is asked
+      # again until the index has caught up, by install_from_pypi.sh: a single
+      # install right after the upload went red on apkradar 2026.48 and on
+      # releaseradar v2026.2 and v2026.4, each time on a release that was fine.
+      - name: Check the published wheel installs and runs
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python -m venv "${RUNNER_TEMP}/verify"
+          bash .github/scripts/install_from_pypi.sh "${RUNNER_TEMP}/verify" exeradar "$VERSION" 10 30
+          "${RUNNER_TEMP}/verify/bin/exeradar" --version
