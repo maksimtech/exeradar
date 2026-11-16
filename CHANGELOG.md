@@ -12,6 +12,16 @@ no version in this file has ever matched — 40 is not a month, and
 
 ## [Unreleased]
 
+### Added
+
+- **A release checks that what it put on PyPI installs and runs.** Nothing did: the image builds from
+  the tag's source and never asks the index. *Publish to PyPI* now installs the new version into a
+  fresh venv after the upload and runs `exeradar --version`, through
+  `.github/scripts/install_from_pypi.sh`, which asks again (ten attempts, 30 s apart) until the
+  index has caught up. A single install right after an upload went red on apkradar 2026.48 and on
+  releaseradar v2026.2 and v2026.4, each time on a release that was fine. The same script and test
+  as the other five Radar.
+
 ### Changed
 
 - **The sqlite3 findings say what Debian decided, and Trivy's two new ones are recorded.** On
