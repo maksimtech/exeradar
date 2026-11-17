@@ -65,6 +65,16 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **"Verified" is decided per cited reference, and the report says where each verified text came
+  from.** An act was verified when its download succeeded and the article or annex part was found.
+  A point the parser missed — `Allegato I, Parte I(2)(f)` in a part that parsed — fell back to the
+  cache, old SHA-256 and date included, under the verified label, or to "SHA256: not available" with
+  an empty cache; and the report added no remark for a verified act, so a citation checked today
+  read the same as one from the cache. Each reference cited is now looked up in the text just
+  parsed, and a missing one makes the act a fetch failure ("Cellar answered without the text
+  cited"); a verified act gets a note, "verified against Cellar (CELEX 32024R2847)". Ported from
+  mailradar #103; `tests/test_law_replayed.py`.
+
 - **A text not verified says which source was tried, and why.** "Article 24 not found in the EUR-Lex
   page" was said of Normattiva's page and of Cellar's, and a missing annex part named no source at
   all. `LawFetchError` now carries `source` and `reached`, and `ActStatus` carries `tried`, `failure`

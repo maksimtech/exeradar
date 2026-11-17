@@ -203,7 +203,10 @@ ask: by default `analyze` cites from the local cache in `~/.exeradar`
 (`$EXERADAR_HOME`), and a provision that is not cached is cited without a hash
 rather than with a guess, with a line saying so. `--online` downloads the texts
 the findings need, compares them with the cache and stores them, so the next
-offline run cites them with their hash:
+offline run cites them with their hash. An act counts as verified only when every
+reference cited from it was in the text downloaded now, and the notes say where
+that text came from (Cellar, the EUR-Lex fallback or Normattiva); otherwise they
+say which source was tried and why its text was not used:
 
 ```
 $ exeradar analyze tampered.exe --online   # once, to fill the cache

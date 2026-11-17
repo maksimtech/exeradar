@@ -418,19 +418,31 @@ def check(
     errors: dict[Act, LawFetchError | None] = {}
     origins: dict[Act, str] = {}
     for act in acts:
+        refs = list(dict.fromkeys(ref for _, a, ref in cited if a == act))
         # The units cited — "13" is the article behind "13(1)", "Allegato I,
         # Parte I" the annex part behind its points — plus ALSO_FETCH
         articles = tuple(dict.fromkeys(
-            [ref.split("(")[0] for _, a, ref in cited if a == act] + list(ALSO_FETCH.get(act, ()))
+            [ref.split("(")[0] for ref in refs] + list(ALSO_FETCH.get(act, ()))
         ))
         if offline:
             errors[act] = None
             continue
         try:
-            by_article, origins[act] = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
+            by_article, origin = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
+            # The unit being there is not enough: each reference cited is
+            # checked against the text just parsed. A point the parser missed
+            # used to fall back to the cache, old hash and date included, under
+            # the "verified" label, or to no hash at all.
+            missing = [ref for ref in refs if ref not in by_article]
+            if missing:
+                raise LawFetchError(
+                    f"{act.name}: {', '.join(missing)} not found in the text from {origin}",
+                    source=origin, reached=True,
+                )
         except LawFetchError as e:
             errors[act] = e
         else:
+            origins[act] = origin
             fresh.update({p.key: p for p in by_article.values()})
 
     # Merged here, not by the save: a cache that cannot be written (read-only,

@@ -270,3 +270,65 @@ def test_the_report_says_why_an_act_was_not_verified(cache):
 
     assert (f"{GDPR.name}: no text available, cited without a hash "
             "(Cellar answered without the text cited: ") in text
+
+
+# --------------------------------------------------------------------------
+# a cited reference must be in the text downloaded now
+# --------------------------------------------------------------------------
+
+POINT_F = "Allegato I, Parte I(2)(f)"
+# Derived: the recorded CRA page with the label of point (2)(f) of Annex I,
+# Part I blanked, so the part and its other points parse and that point does not
+CRA_WITHOUT_POINT_F = CRA_PAGE.replace('<p class="oj-normal">f)</p>', '<p class="oj-normal">-</p>')
+# Derived: the recorded GDPR page with paragraph 1 of art. 32 no longer marked
+# as a paragraph, so article 32 parses and 32(1) does not
+GDPR_WITHOUT_32_1 = GDPR_PAGE.replace('id="032.001"', 'id="x"')
+
+
+def test_the_derived_pages_lack_only_the_reference_cited():
+    """What the tests below rely on."""
+    annex = law_fetcher.parse_articles(CRA_WITHOUT_POINT_F, ("Allegato I, Parte I",))
+    assert "Allegato I, Parte I(2)(e)" in annex and POINT_F not in annex
+    gdpr = law_fetcher.parse_articles(GDPR_WITHOUT_32_1, ("32",))
+    assert "32" in gdpr and "32(1)" not in gdpr
+
+
+def test_a_point_missing_from_the_fresh_text_is_not_verified(cache):
+    """The annex part parsed and the point cited was not in it: the act was
+    "verified against Cellar" beside "SHA256: not available"."""
+    answers = recorded(**{CELLAR_CRA: page(CRA_WITHOUT_POINT_F)})
+    outcome = check(unsigned(), cache=cache, now=DAY1, client=services(answers))
+
+    cra = status_of(outcome, CRA)
+    assert (cra.source, cra.tried, cra.failure) == ("unavailable", "Cellar", "not_in_text")
+    assert POINT_F in (cra.error or "")
+    assert next(c for c in outcome.citations if c.article == POINT_F).sha256 is None
+
+
+def test_a_cached_reference_is_not_served_as_verified(cache):
+    """The same, with 32(1) cached by an earlier run: its old SHA-256 and date
+    came back under the "verified" label, as if checked against today's text."""
+    first = check(unsigned(), cache=cache, now=DAY1, client=services(recorded()))
+    assert status_of(first, GDPR).source == "verified"
+    cached = next(c for c in first.citations if c.law == GDPR.name)
+    assert cached.sha256 is not None
+
+    answers = recorded(**{CELLAR_GDPR: page(GDPR_WITHOUT_32_1)})
+    outcome = check(unsigned(), cache=cache, now=DAY2, client=services(answers))
+
+    gdpr = status_of(outcome, GDPR)
+    assert (gdpr.source, gdpr.failure) == ("cache", "not_in_text")
+    assert gdpr.reason == "Cellar answered without the text cited"
+    citation = next(c for c in outcome.citations if c.law == GDPR.name)
+    assert (citation.sha256, citation.version_date) == (cached.sha256, "2026-09-21")
+
+
+def test_the_report_says_where_each_verified_text_came_from(cache):
+    """It added no remark for a verified act, so a reader could not tell a
+    citation checked today against Cellar from one out of the cache."""
+    answers = recorded(**{CELLAR_GDPR: redirect(BAD_HOST), EURLEX_GDPR: page(GDPR_PAGE)})
+    text = report.to_markdown(unsigned(), law=check(unsigned(), cache=cache, now=DAY1, client=services(answers)))
+
+    assert f"{CRA.name}: verified against Cellar (CELEX {CRA.celex})" in text
+    assert f"{GDPR.name}: verified against EUR-Lex (CELEX {GDPR.celex})" in text
+    assert f"{DLGS_138_2024.name}: verified against Normattiva (URN {DLGS_138_2024.celex})" in text
