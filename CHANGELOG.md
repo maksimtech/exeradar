@@ -53,6 +53,14 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **Security Posture gives no verdict on a Docker Scout scan that failed.** Its `workflow_run` trigger
+  had no condition on the scan's outcome. On 2026-11-16 Docker Scout failed on main before scanning, on
+  a 403 while downloading its own binary (run 43925337119), and the gate ran on it anyway and went green
+  on the previous scan's alerts. The job now runs after a scan only when the scan succeeded, the
+  condition `docker-scout.yml` already puts on the image build; the failed scan stays red, and the gate
+  runs again when the scan is rerun or on the next push or schedule. `tests/test_scan_after_publish.py`
+  holds it.
+
 - **Security Posture reads every page of alerts.** The code scanning API returns at most a hundred
   alerts per call, and the gate read one page of each list. Found in cookieradar on 2026-11-13
   (cookieradar #70): a pull request with 123 open alerts and main with 142, three exceptions whose
