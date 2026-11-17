@@ -132,3 +132,41 @@ def test_then_the_cache(cache):
     assert status_of(outcome, GDPR).source == "cache"
     gdpr = [c for c in outcome.citations if c.law == GDPR.name]
     assert [c.sha256 for c in gdpr] == [c.sha256 for c in first.citations if c.law == GDPR.name]
+
+
+# --------------------------------------------------------------------------
+# redirects stay on the source's host
+# --------------------------------------------------------------------------
+
+# Cellar's recorded 303, pointed at another host and at another port
+OFF_HOST = ["https://example.org/resource/DOC_1", "http://example.org/resource/DOC_1",
+            "https://publications.europa.eu:8443/resource/DOC_1"]
+
+
+@pytest.mark.parametrize("location", OFF_HOST)
+def test_a_redirect_to_another_host_is_not_followed(location):
+    """The text another host serves is not Cellar's, whatever Cellar's 303 says."""
+    seen: list[str] = []
+    forged = page(GDPR_PAGE.replace("Tenendo conto", "Testo falso"))
+    client = services({CELLAR_GDPR: redirect(location), location.replace("http://", "https://", 1): forged}, seen)
+
+    with pytest.raises(LawFetchError, match="redirected"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=client)
+    assert seen == [CELLAR_GDPR]
+
+
+@pytest.mark.parametrize("location", OFF_HOST)
+def test_a_text_from_another_host_is_not_verified_against_cellar(cache, location):
+    """It was fetched, hashed, cached and cited as "verified", origin Cellar."""
+    seen: list[str] = []
+    forged = page(GDPR_PAGE.replace("Tenendo conto", "Testo falso"))
+    answers = recorded(**{
+        CELLAR_GDPR: redirect(location),
+        location.replace("http://", "https://", 1): forged,
+        EURLEX_GDPR: WAF_202,
+    })
+    outcome = check(unsigned(), cache=cache, now=DAY1, client=services(answers, seen))
+
+    assert (status_of(outcome, GDPR).source, status_of(outcome, GDPR).origin) == ("unavailable", None)
+    assert [url for url in seen if url not in (CELLAR_GDPR, EURLEX_GDPR, CELLAR_CRA, ART_24)] == []
+    assert {c.sha256 for c in outcome.citations if c.law == GDPR.name} == {None}

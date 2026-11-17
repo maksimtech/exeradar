@@ -604,10 +604,18 @@ def _source_of(url: str) -> str:
 
 
 MAX_REDIRECTS = 5
+# The one host each source may redirect to: a text served from anywhere else
+# would be labelled "verified against Cellar" without being Cellar's.
+SOURCE_HOSTS = {
+    "Cellar": "publications.europa.eu",
+    "EUR-Lex": "eur-lex.europa.eu",
+    "Normattiva": "www.normattiva.it",
+}
 
 
 def _get_over_https(client: httpx.Client, url: str, headers: dict[str, str], source: str) -> httpx.Response:
-    """GET `url`, following redirects by hand and never over plain HTTP.
+    """GET `url`, following redirects by hand, never over plain HTTP and never
+    off the source's host.
 
     Cellar answers its https:// URL with a 303 to an http:// one: recorded on
     2026-10-11 for the GDPR, resource/celex/32016R0679 -> 303 ->
@@ -617,6 +625,7 @@ def _get_over_https(client: httpx.Client, url: str, headers: dict[str, str], sou
     the same document, byte for byte, so such a hop is taken over HTTPS; if that
     fails, the caller's fallback to EUR-Lex applies, as for any other failure.
     """
+    expected = SOURCE_HOSTS.get(source, "").encode("ascii")
     target = httpx.URL(url)
     for _ in range(MAX_REDIRECTS + 1):
         if target.scheme == "http":
@@ -625,6 +634,10 @@ def _get_over_https(client: httpx.Client, url: str, headers: dict[str, str], sou
         if not response.is_redirect:
             return response
         target = response.url.join(response.headers["location"])
+        # raw_host: decoding the host is what raises on one like "xn--"
+        if target.raw_host != expected or target.port not in (None, 443):
+            host = target.raw_host.decode("ascii", "replace") + (f":{target.port}" if target.port else "")
+            raise LawFetchError(f"{source} redirected to {host}, not to {expected.decode('ascii')}: not followed")
     raise LawFetchError(f"{source} redirected more than {MAX_REDIRECTS} times")
 
 

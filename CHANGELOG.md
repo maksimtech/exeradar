@@ -65,6 +65,14 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **Redirects stay on the source's host.** They were followed to any host and port: a 303 from
+  Cellar to another host had its page downloaded, hashed, cached and cited as "verified", origin
+  Cellar. A redirect is now followed only to `publications.europa.eu`, `eur-lex.europa.eu` or
+  `www.normattiva.it`, the one of the source asked, on the default port; the `http://` hop Cellar
+  makes is still taken over HTTPS. The hosts `docs/nis2-compliance.md` lists are now the only ones
+  `analyze --online` can reach. Ported from mailradar #103; `tests/test_law_fetcher.py` and
+  `tests/test_law_replayed.py`.
+
 - **A redirect httpx cannot follow is a fetch failure.** Only `httpx.HTTPError` was one: a 303 to
   `http://xn--/DOC_1` raises `idna.core.IDNAError`, a `ValueError`, which skipped the EUR-Lex
   fallback and the cache and ended the law check. `httpx.InvalidURL` and `ValueError` are now fetch

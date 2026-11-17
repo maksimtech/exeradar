@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from exeradar import law_fetcher
@@ -208,6 +209,53 @@ def test_the_language_reaches_cellar_as_a_three_letter_code(monkeypatch):
 
     assert seen["Accept-Language"] == "ita"
     assert "xhtml" in seen["Accept"]
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("url", [
+    "https://publications.europa.eu/resource/celex/32016R0679",
+    "https://eur-lex.europa.eu/legal-content/IT/TXT/HTML/?uri=CELEX:32016R0679",
+    "https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2024-09-04;138~art24!vig=",
+])
+@pytest.mark.parametrize("location", [
+    "https://example.org/page",
+    "http://example.org/page",
+    "https://normattiva.it/page",                    # not www.normattiva.it
+    "https://publications.europa.eu.example.org/page",
+    "https://eur-lex.europa.eu:8443/page",
+    "https://publications.europa.eu:8443/page",
+])
+def test_a_redirect_off_the_source_host_is_refused(url, location):
+    """A text served from anywhere else would be labelled "verified against
+    Cellar" without being Cellar's: redirects were followed to any host."""
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": location})
+        return httpx.Response(200, text="<html>elsewhere</html>")
+
+    with pytest.raises(LawFetchError, match="redirected"):
+        law_fetcher.fetch_html(url, client=_client(handler))
+    assert seen == [url]
+
+
+@pytest.mark.parametrize("url", [
+    "https://eur-lex.europa.eu/legal-content/IT/TXT/HTML/?uri=CELEX:32016R0679",
+    "https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2024-09-04;138~art24!vig=",
+])
+def test_a_redirect_on_the_source_host_is_followed(url):
+    """The http:// hop Cellar makes is in test_law_fetch_https.py."""
+    def handler(request):
+        if request.url.path != "/moved":
+            return httpx.Response(302, headers={"Location": f"http://{request.url.host}/moved"})
+        return httpx.Response(200, text="<html>moved</html>")
+
+    assert law_fetcher.fetch_html(url, client=_client(handler)) == "<html>moved</html>"
 
 
 def test_normattiva_acts_do_not_go_through_cellar():
