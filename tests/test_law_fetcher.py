@@ -80,6 +80,20 @@ def test_the_two_parts_do_not_run_into_each_other(annex):
     assert annex[f"{PART_I}(2)"] not in annex[PART_II]
 
 
+def test_a_bare_annex_does_not_mix_its_parts(cra, annex):
+    """"Allegato I" without a part numbered the points of both parts as its own:
+    "Allegato I(1)" was Part II(1), written over Part I(1), and "Allegato I(2)"
+    was Part II(2) beside "Allegato I(2)(a)" from Part I. Nothing cites a bare
+    annex today, so it was latent; the points now keep the part they are in."""
+    whole = parse_articles(cra, ("Allegato I",))
+
+    assert not any(ref.startswith("Allegato I(") for ref in whole), sorted(whole)
+    for ref in (f"{PART_I}(1)", f"{PART_I}(2)", f"{PART_I}(2)(f)", f"{PART_II}(1)", f"{PART_II}(2)"):
+        assert whole[ref] == annex[ref], ref
+    assert annex[PART_I] in whole["Allegato I"]
+    assert annex[PART_II] in whole["Allegato I"]
+
+
 def test_the_integrity_requirement_is_where_exeradar_says_it_is(annex):
     """Part I(2)(f) is the provision the signature findings are cited under.
 

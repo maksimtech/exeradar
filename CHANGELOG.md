@@ -65,6 +65,12 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A bare "Allegato I" no longer mixes Part I and Part II.** Both parts of the CRA's Annex I are
+  numbered from (1), and a unit with no part gave each point the annex's name alone: "Allegato I(1)"
+  was Part II(1) written over Part I(1), and "Allegato I(2)" was Part II(2) beside "Allegato I(2)(a)"
+  from Part I. Nothing cites a bare annex, so no report was wrong; the points now keep their part,
+  "Allegato I, Parte I(1)". `tests/test_law_fetcher.py`.
+
 - **Paragraphs inserted by Italian amendments can be cited.** Normattiva numbers them "3-bis",
   "4-ter", "5-quinquies"; the parser read only digits, so such a paragraph had no reference of its
   own and its points none either, and one numbered inside the update marks, "((3-bis. ", was not

@@ -506,6 +506,8 @@ def _parse_annex(root: _Element, unit: str) -> dict[str, str]:
         return {}
     annex_id = f"anx_{match.group(1).upper()}"
     wanted = match.group(2).upper() if match.group(2) else None
+    # The word for a part in the language the unit is written in
+    part_word = "Part" if unit.lower().startswith("annex") else "Parte"
 
     annex = next((e for e in _elements(root) if e.attrs.get("id") == annex_id), None)
     if annex is None:
@@ -524,7 +526,11 @@ def _parse_annex(root: _Element, unit: str) -> dict[str, str]:
             if point is None:
                 continue
             number, text = point
-            ref = f"{unit}({number})"
+            # A bare annex keeps each point in its part: Part I and Part II are
+            # both numbered from (1), and "Allegato I(1)" named both, the second
+            # written over the first
+            where = unit if wanted is not None or part is None else f"{unit}, {part_word} {part}"
+            ref = f"{where}({number})"
             texts[ref] = text
             lines.append(text)
             for nested in _elements(child):
