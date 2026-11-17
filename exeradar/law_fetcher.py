@@ -244,7 +244,9 @@ def _text(node: _Element | str) -> str:
 # ─── Tree → provisions ────────────────────────────────────────────────────────
 
 _PARAGRAPH_ID = re.compile(r"^\d{3}\.\d{3}$")   # <div id="005.001"> is art. 5(1)
-_PARAGRAPH = re.compile(r"^(\d+)\. ")           # "1. I dati personali sono:"
+# "1. I dati personali sono:", and the paragraphs Italian amendments insert: "3-bis. ",
+# "4-ter. ", ... every Latin adverb after quater ends in -ies (quinquies, decies, terdecies)
+_PARAGRAPH = re.compile(r"^(\d+(?:-(?:bis|ter|quater|[a-z]+ies))?)\. ")
 _NUMBERED = re.compile(r"^(\d+)\) ")            # GDPR art. 4: "1) «dato personale»: ..."
 _LETTER = re.compile(r"^([a-z]{1,4})\)$")       # table label cell: "a)"
 _POINT = re.compile(r"^([a-z]{1,4})\) ")          # Normattiva point: "a) ingannevoli ..."
@@ -324,7 +326,7 @@ def _parse_block(nodes: list, prefix: str) -> tuple[list[str], dict[str, str]]:
     return lines, points
 
 
-def _parse_paragraphs(groups: list[tuple[int, list]], number: str) -> dict[str, str]:
+def _parse_paragraphs(groups: list[tuple[str, list]], number: str) -> dict[str, str]:
     texts: dict[str, str] = {}
     lines = []
     for paragraph, nodes in groups:
@@ -345,7 +347,7 @@ def _parse_eli_article(article: _Element, number: str) -> dict[str, str]:
     ]
     if paragraphs:
         return _parse_paragraphs(
-            [(int(div.attrs["id"].split(".")[1]), div.children) for div in paragraphs], number
+            [(str(int(div.attrs["id"].split(".")[1])), div.children) for div in paragraphs], number
         )
     lines, points = _parse_block(article.children, number)
     return {**points, number: "\n".join(lines)}
@@ -369,14 +371,15 @@ def _parse_normattiva_article(root: _Element, number: str) -> dict[str, str]:
             for e in _elements(body)
         ):
             continue
-        groups: list[tuple[int | None, str, dict[str, str]]] = []
+        groups: list[tuple[str | None, str, dict[str, str]]] = []
         for comma in (e for e in _elements(body) if "art-comma-div-akn" in e.classes):
             text = _without_update_marks(_text(comma))
             if not text:
                 continue
             num = next((e for e in _elements(comma) if "comma-num-akn" in e.classes), None)
-            match = _PARAGRAPH.match(_text(num) + " ") if num is not None else None
-            paragraph = int(match.group(1)) if match else None
+            # Update marks too: an inserted paragraph is numbered "((3-bis. "
+            match = _PARAGRAPH.match(_without_update_marks(_text(num)) + " ") if num is not None else None
+            paragraph = match.group(1) if match else None   # "3", "3-bis"
             points = {}
             for item in (e for e in _elements(comma) if "pointedList-rest-akn" in e.classes):
                 point = _without_update_marks(_text(item))
@@ -426,12 +429,12 @@ def _parse_consolidated_article(root: _Element, number: str) -> dict[str, str]:
 
 
 def _split_flat_paragraphs(body: list, number: str) -> dict[str, str]:
-    groups: list[tuple[int, list]] = []
+    groups: list[tuple[str, list]] = []
     intro: list = []
     for node in _flatten(body):
         match = _PARAGRAPH.match(_text(node)) if isinstance(node, _Element) and node.tag == "p" else None
         if match:
-            groups.append((int(match.group(1)), [node]))
+            groups.append((match.group(1), [node]))
         elif groups:
             groups[-1][1].append(node)
         else:

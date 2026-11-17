@@ -96,6 +96,30 @@ def test_the_letters_cited_are_the_ones_the_decree_has(real_fetch):
         "e) sicurezza dell'acquisizione, dello sviluppo e della manutenzione dei sistemi informativi e di rete")
 
 
+def test_an_inserted_paragraph_can_be_cited_on_its_own():
+    """Italian amendments insert paragraphs as "2-bis", "3-ter", ...: they were part of the article's text and had
+    no reference of their own. Derived from the recorded page: paragraph 2, points and all, renumbered as an
+    amendment inserted between update marks, and paragraph 4 as a later one."""
+    html = NORMATTIVA_PAGE.replace('comma-num-akn">2. <', 'comma-num-akn">((2-bis. <')
+    html = html.replace('comma-num-akn">4. <', 'comma-num-akn">3-ter. <')
+    assert html.count("-bis. <") == html.count("3-ter. <") == 1
+
+    texts = law_fetcher.parse_articles(html, ("24",))
+
+    assert texts["24(2-bis)"].startswith("2-bis. Le misure di cui al comma 1")
+    assert texts["24(2-bis)(d)"].startswith("d) sicurezza della catena di approvvigionamento")
+    assert texts["24(3-ter)"].startswith("3-ter. Qualora un soggetto rilevi")
+    assert texts["24"].split("\n") == [texts[f"24({n})"] for n in ("1", "2-bis", "3", "3-ter")]
+
+
+@pytest.mark.parametrize("suffix", ["ter", "quater", "quinquies", "sexies", "decies", "terdecies"])
+def test_the_later_latin_numbers_can_be_cited(suffix):
+    html = NORMATTIVA_PAGE.replace('comma-num-akn">4. <', f'comma-num-akn">4-{suffix}. <')
+    assert html != NORMATTIVA_PAGE
+
+    assert law_fetcher.parse_articles(html, ("24",))[f"24(4-{suffix})"].startswith(f"4-{suffix}. ")
+
+
 def test_the_scope_note_comes_with_the_decree():
     notes = law_checker.notes_of(UNSIGNED, now=NOW)
     assert law_checker.NIS2_SCOPE_NOTE in notes

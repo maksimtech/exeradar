@@ -65,6 +65,12 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **Paragraphs inserted by Italian amendments can be cited.** Normattiva numbers them "3-bis",
+  "4-ter", "5-quinquies"; the parser read only digits, so such a paragraph had no reference of its
+  own and its points none either, and one numbered inside the update marks, "((3-bis. ", was not
+  recognised at all. `24(3-bis)` and `24(3-bis)(a)` now exist beside `24(3)`. Ported from mailradar
+  #103; `tests/test_law_italian_sources.py`, on the recorded art. 24 page renumbered.
+
 - **A deeply nested `law_cache.json` no longer drops every citation.** `json.loads` raises
   `RecursionError` on it, which is neither `OSError` nor `ValueError`, so it escaped
   `LawCache.load`, ended the law check, and `analyze` printed "provisions not cited: maximum recursion
