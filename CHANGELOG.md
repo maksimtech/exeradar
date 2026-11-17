@@ -65,6 +65,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A law text download is bounded in size and time.** Nothing bounded a response: the body was read
+  whole into memory whatever its size, and the 30 s timeout applies to each read, so a server sending
+  a byte every few seconds held `analyze --online` for as long as it liked. The body is now streamed
+  and refused past 32 MiB (the GDPR from Cellar is 0.8 MB), and a fetch, redirects included, ends
+  after 120 s; either is a fetch failure, so the fallback and the cache apply. Ported from mailradar
+  #103; `tests/test_law_fetcher.py`.
+
 - **Redirects stay on the source's host.** They were followed to any host and port: a 303 from
   Cellar to another host had its page downloaded, hashed, cached and cited as "verified", origin
   Cellar. A redirect is now followed only to `publications.europa.eu`, `eur-lex.europa.eu` or

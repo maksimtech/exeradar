@@ -258,6 +258,66 @@ def test_a_redirect_on_the_source_host_is_followed(url):
     assert law_fetcher.fetch_html(url, client=_client(handler)) == "<html>moved</html>"
 
 
+# --------------------------------------------------------------------------
+# size and time
+# --------------------------------------------------------------------------
+# The limits are lowered for these tests, so that they run in a second; set
+# with raising=False, so that the tests fail on the behaviour, not on a name.
+
+CELLAR_GDPR = "https://publications.europa.eu/resource/celex/32016R0679"
+
+
+def _streamed(chunks, pause=0.0):
+    import time
+
+    def body():
+        for chunk in chunks:
+            time.sleep(pause)
+            yield chunk
+
+    return _client(lambda request: httpx.Response(200, content=body()))
+
+
+def test_a_response_larger_than_the_limit_is_refused(monkeypatch):
+    """Nothing bounded a response: a server could fill the memory of the run."""
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    with pytest.raises(LawFetchError, match="Cellar sent more than 65536 bytes"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=_streamed([b"x" * 1024] * 200))
+
+
+def test_a_declared_length_over_the_limit_is_refused_before_reading(monkeypatch):
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    client = _client(lambda request: httpx.Response(200, content=b"x" * (65 * 1024)))
+    with pytest.raises(LawFetchError, match="Cellar sent more than 65536 bytes"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=client)
+
+
+def test_a_response_within_the_limit_is_read_whole(monkeypatch):
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    assert law_fetcher.fetch_html(
+        CELLAR_GDPR, client=_streamed([b"<html>", b"ok", b"</html>"])
+    ) == "<html>ok</html>"
+
+
+def test_a_server_that_drips_is_cut_off_at_the_deadline(monkeypatch):
+    """Each chunk arrives well within the read timeout, so only an overall
+    deadline stops it: 40 chunks, 0.1 s apart, against a 0.5 s deadline."""
+    import time
+
+    monkeypatch.setattr(law_fetcher, "FETCH_DEADLINE", 0.5, raising=False)
+    started = time.monotonic()
+    with pytest.raises(LawFetchError, match="Cellar took more than 0.5 s"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=_streamed([b"x"] * 40, pause=0.1))
+    assert time.monotonic() - started < 2
+
+
+def test_the_limits_are_sane():
+    """Room for the largest act the Radars cite (the GDPR from Cellar was 823981
+    bytes on 2026-10-11), and an end to a fetch that never finishes."""
+    assert 8 * 1024 * 1024 <= law_fetcher.MAX_RESPONSE_BYTES <= 64 * 1024 * 1024
+    assert 30 <= law_fetcher.FETCH_DEADLINE <= 300
+
+
 def test_normattiva_acts_do_not_go_through_cellar():
     """Cellar publishes EU law; Italian acts are not in it."""
     italian = Act("x", "urn:nir:stato:legge:2000-01-01;1", source="Normattiva")

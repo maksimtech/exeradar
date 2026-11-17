@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 import unicodedata
 from collections.abc import Iterator
 from dataclasses import asdict, dataclass
@@ -613,9 +614,24 @@ SOURCE_HOSTS = {
 }
 
 
-def _get_over_https(client: httpx.Client, url: str, headers: dict[str, str], source: str) -> httpx.Response:
+# A page is read up to this size, and a fetch, redirects included, ends at this
+# deadline. The largest act cited, the GDPR from Cellar, was 823981 bytes on
+# 2026-10-11. The timeout bounds each read, not the whole: without a deadline a
+# server sending a byte every few seconds held the analysis for as long as it liked.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+FETCH_DEADLINE = 120.0
+
+
+def _past(deadline: float, source: str) -> None:
+    if time.monotonic() > deadline:
+        raise LawFetchError(f"{source} took more than {FETCH_DEADLINE:g} s")
+
+
+def _get_over_https(
+    client: httpx.Client, url: str, headers: dict[str, str], source: str, deadline: float
+) -> httpx.Response:
     """GET `url`, following redirects by hand, never over plain HTTP and never
-    off the source's host.
+    off the source's host. The response is streamed: the caller reads and closes it.
 
     Cellar answers its https:// URL with a 303 to an http:// one: recorded on
     2026-10-11 for the GDPR, resource/celex/32016R0679 -> 303 ->
@@ -628,17 +644,48 @@ def _get_over_https(client: httpx.Client, url: str, headers: dict[str, str], sou
     expected = SOURCE_HOSTS.get(source, "").encode("ascii")
     target = httpx.URL(url)
     for _ in range(MAX_REDIRECTS + 1):
+        _past(deadline, source)
         if target.scheme == "http":
             target = target.copy_with(scheme="https")
-        response = client.get(target, headers=headers, follow_redirects=False)
+        response = client.send(
+            client.build_request("GET", target, headers=headers), stream=True, follow_redirects=False
+        )
         if not response.is_redirect:
             return response
+        response.close()
         target = response.url.join(response.headers["location"])
         # raw_host: decoding the host is what raises on one like "xn--"
         if target.raw_host != expected or target.port not in (None, 443):
             host = target.raw_host.decode("ascii", "replace") + (f":{target.port}" if target.port else "")
             raise LawFetchError(f"{source} redirected to {host}, not to {expected.decode('ascii')}: not followed")
     raise LawFetchError(f"{source} redirected more than {MAX_REDIRECTS} times")
+
+
+def _read_capped(response: httpx.Response, source: str, deadline: float) -> str:
+    """The body as text, refused past MAX_RESPONSE_BYTES or past the deadline."""
+    too_large = f"{source} sent more than {MAX_RESPONSE_BYTES} bytes"
+    declared = response.headers.get("Content-Length", "")
+    if declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
+        raise LawFetchError(too_large)
+    body = bytearray()
+    for chunk in response.iter_bytes():
+        body += chunk
+        if len(body) > MAX_RESPONSE_BYTES:
+            raise LawFetchError(too_large)
+        _past(deadline, source)
+    # As Response.text decodes: the charset declared, else the client's default
+    return body.decode(response.encoding or "utf-8", errors="replace")
+
+
+def _download(client: httpx.Client, url: str, headers: dict[str, str], source: str) -> str:
+    deadline = time.monotonic() + FETCH_DEADLINE
+    response = _get_over_https(client, url, headers, source, deadline)
+    try:
+        if response.status_code != 200:
+            raise LawFetchError(f"{source} answered HTTP {response.status_code}")
+        return _read_capped(response, source, deadline)
+    finally:
+        response.close()
 
 
 def fetch_html(
@@ -655,17 +702,13 @@ def fetch_html(
     try:
         if client is None:
             with httpx.Client(timeout=timeout) as own_client:
-                response = _get_over_https(own_client, url, headers, source)
-        else:
-            response = _get_over_https(client, url, headers, source)
+                return _download(own_client, url, headers, source)
+        return _download(client, url, headers, source)
     # Not only httpx.HTTPError: a Location httpx cannot follow raises
     # httpx.InvalidURL, or idna.core.IDNAError (a ValueError) for a host such
     # as "xn--", and either one used to skip the EUR-Lex fallback and the cache.
     except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
         raise LawFetchError(f"{source} unreachable: {e}") from e
-    if response.status_code != 200:
-        raise LawFetchError(f"{source} answered HTTP {response.status_code}")
-    return response.text
 
 
 def fetch_act_html(
