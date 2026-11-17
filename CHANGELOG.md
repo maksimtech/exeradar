@@ -65,6 +65,14 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A text not verified says which source was tried, and why.** "Article 24 not found in the EUR-Lex
+  page" was said of Normattiva's page and of Cellar's, and a missing annex part named no source at
+  all. `LawFetchError` now carries `source` and `reached`, and `ActStatus` carries `tried`, `failure`
+  and `reason`, so the report says "Cellar answered without the text cited" or "Cellar and EUR-Lex
+  unreachable" before the error itself; it printed the error alone. Offline is a failure of its own,
+  `"offline"`, whose reason names no source: nothing was tried, and "unreachable" would report an
+  outage that never happened. Ported from mailradar #103; `tests/test_law_replayed.py`.
+
 - **A law text download is bounded in size and time.** Nothing bounded a response: the body was read
   whole into memory whatever its size, and the 30 s timeout applies to each read, so a server sending
   a byte every few seconds held `analyze --online` for as long as it liked. The body is now streamed

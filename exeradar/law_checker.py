@@ -332,6 +332,12 @@ class Citation:
     version_date: str | None   # YYYY-MM-DD the wording was downloaded
 
 
+# Why an act is not verified when nothing was downloaded by choice. Its own
+# failure, and not "unreachable": no source was tried, and naming one would
+# report an outage that never happened.
+OFFLINE = "offline: the text was not downloaded"
+
+
 @dataclass(frozen=True)
 class ActStatus:
     act: Act
@@ -341,6 +347,23 @@ class ActStatus:
     error: str | None = None
     # Where a verified text came from: "Cellar", "EUR-Lex" (the fallback) or "Normattiva"; None otherwise
     origin: str | None = None
+    # When not verified: the source tried last ("Cellar", "EUR-Lex", "Normattiva", "Cellar and
+    # EUR-Lex"; None if none was, or it is not known), and why it was not used: "unreachable"
+    # (no page), "not_in_text" (a page, without the text cited) or "offline" (nothing tried)
+    tried: str | None = None
+    failure: str | None = None
+
+    @property
+    def reason(self) -> str | None:
+        """Why the act was not verified, as a report says it: "Cellar and EUR-Lex unreachable"."""
+        if self.source == "verified":
+            return None
+        if self.failure == "offline":
+            return OFFLINE
+        tried = self.tried or "the source"
+        if self.failure == "not_in_text":
+            return f"{tried} answered without the text cited"
+        return f"{tried} unreachable"
 
 
 @dataclass
@@ -391,7 +414,8 @@ def check(
     acts = list(dict.fromkeys(act for _, act, _ in cited))
     # Keyed by (celex, article) — the cache's key, not the fetcher's.
     fresh: dict[Key, Provision] = {}
-    errors: dict[Act, str] = {}
+    # None: not downloaded, offline by choice
+    errors: dict[Act, LawFetchError | None] = {}
     origins: dict[Act, str] = {}
     for act in acts:
         # The units cited — "13" is the article behind "13(1)", "Allegato I,
@@ -400,12 +424,12 @@ def check(
             [ref.split("(")[0] for _, a, ref in cited if a == act] + list(ALSO_FETCH.get(act, ()))
         ))
         if offline:
-            errors[act] = "offline: the text was not downloaded"
+            errors[act] = None
             continue
         try:
             by_article, origins[act] = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
         except LawFetchError as e:
-            errors[act] = str(e)
+            errors[act] = e
         else:
             fresh.update({p.key: p for p in by_article.values()})
 
@@ -423,8 +447,16 @@ def check(
         if act not in errors:
             statuses.append(ActStatus(act, "verified", origin=origins[act]))
         else:
+            error = errors[act]
             cached = any((act.celex, ref) in provisions for _, a, ref in cited if a == act)
-            statuses.append(ActStatus(act, "cache" if cached else "unavailable", errors[act]))
+            source = "cache" if cached else "unavailable"
+            if error is None:
+                statuses.append(ActStatus(act, source, OFFLINE, failure="offline"))
+            else:
+                statuses.append(ActStatus(
+                    act, source, str(error),
+                    tried=error.source, failure="not_in_text" if error.reached else "unreachable",
+                ))
 
     citations = []
     for finding, act, ref in cited:

@@ -23,11 +23,12 @@ from pathlib import Path
 import httpx
 import pytest
 
-from exeradar import law_fetcher
+from exeradar import law_checker, law_fetcher, report
 from exeradar.law_cache import LawCache
 from exeradar.law_checker import check
 from exeradar.law_fetcher import CRA, DLGS_138_2024, GDPR, LawFetchError
 from exeradar.models import ExeResult, Signature, SignatureState, Strings
+from tests.names import mentions
 
 FIXTURES = Path(__file__).parent / "fixtures"
 REDIRECT = json.loads((FIXTURES / "cellar_redirect_32016R0679.json").read_text(encoding="utf-8"))
@@ -170,3 +171,102 @@ def test_a_text_from_another_host_is_not_verified_against_cellar(cache, location
     assert (status_of(outcome, GDPR).source, status_of(outcome, GDPR).origin) == ("unavailable", None)
     assert [url for url in seen if url not in (CELLAR_GDPR, EURLEX_GDPR, CELLAR_CRA, ART_24)] == []
     assert {c.sha256 for c in outcome.citations if c.law == GDPR.name} == {None}
+
+
+# --------------------------------------------------------------------------
+# errors and statuses name the source that was tried
+# --------------------------------------------------------------------------
+
+
+def test_an_article_missing_from_normattiva_names_normattiva():
+    """It said "Article 99 not found in the EUR-Lex page" of a Normattiva page.
+    Derived: Normattiva's recorded art. 24 page, served for art. 99."""
+    art_99 = law_fetcher.NORMATTIVA_URL.format(urn=DLGS_138_2024.celex, article="99")
+    with pytest.raises(LawFetchError) as caught:
+        law_fetcher.fetch_provisions_from(DLGS_138_2024, ("99",), client=services({art_99: page(NORMATTIVA_PAGE)}))
+
+    assert "Normattiva" in str(caught.value)
+    assert "EUR-Lex" not in str(caught.value)
+    assert (caught.value.source, caught.value.reached) == ("Normattiva", True)
+
+
+def test_an_article_missing_from_cellar_names_cellar():
+    with pytest.raises(LawFetchError) as caught:
+        law_fetcher.fetch_provisions_from(GDPR, ("99",), client=services(recorded()))
+
+    assert "Cellar" in str(caught.value)
+    assert "EUR-Lex" not in str(caught.value)
+    assert (caught.value.source, caught.value.reached) == ("Cellar", True)
+
+
+def test_an_annex_missing_from_cellar_names_cellar():
+    """The annex message named no source at all: "Allegato IV not found in the page"."""
+    with pytest.raises(LawFetchError, match="Allegato IV") as caught:
+        law_fetcher.fetch_provisions_from(CRA, ("Allegato IV",), client=services(recorded()))
+
+    assert "Cellar" in str(caught.value)
+    assert (caught.value.source, caught.value.reached) == ("Cellar", True)
+
+
+@pytest.mark.parametrize("location", OFF_HOST)
+def test_a_refused_redirect_names_the_source_and_the_host(location):
+    with pytest.raises(LawFetchError) as caught:
+        law_fetcher.fetch_html(CELLAR_GDPR, client=services({CELLAR_GDPR: redirect(location)}))
+
+    assert (caught.value.source, caught.value.reached) == ("Cellar", False)
+    host = httpx.URL(location).host
+    assert mentions(str(caught.value), host)
+
+
+def test_a_status_says_the_source_answered_without_the_text(cache):
+    """Cellar was reached and its page lacked the article: not "unreachable".
+    Derived: the recorded GDPR page with article 32 renumbered 99."""
+    answers = recorded(**{CELLAR_GDPR: page(GDPR_PAGE.replace('id="art_32"', 'id="art_99"'))})
+    gdpr = status_of(check(unsigned(), cache=cache, now=DAY1, client=services(answers)), GDPR)
+
+    assert (gdpr.source, gdpr.tried, gdpr.failure) == ("unavailable", "Cellar", "not_in_text")
+    assert gdpr.reason == "Cellar answered without the text cited"
+    assert "EUR-Lex" not in (gdpr.error or "")
+
+
+def test_a_status_names_both_sources_when_neither_answered(cache):
+    answers = recorded(**{CELLAR_GDPR: redirect("https://example.org/DOC_1"), EURLEX_GDPR: WAF_202})
+    gdpr = status_of(check(unsigned(), cache=cache, now=DAY1, client=services(answers)), GDPR)
+
+    assert (gdpr.source, gdpr.tried, gdpr.failure) == ("unavailable", "Cellar and EUR-Lex", "unreachable")
+    assert gdpr.reason == "Cellar and EUR-Lex unreachable"
+
+
+def test_a_status_names_normattiva_when_normattiva_did_not_answer(cache):
+    answers = recorded(**{ART_24: (503, {}, "")})
+    decree = status_of(check(unsigned(), cache=cache, now=DAY1, client=services(answers)), DLGS_138_2024)
+
+    assert (decree.tried, decree.failure, decree.reason) == ("Normattiva", "unreachable", "Normattiva unreachable")
+
+
+def test_a_verified_status_has_no_reason(cache):
+    gdpr = status_of(check(unsigned(), cache=cache, now=DAY1, client=services(recorded())), GDPR)
+
+    assert (gdpr.source, gdpr.tried, gdpr.failure, gdpr.reason) == ("verified", None, None, None)
+
+
+def test_offline_is_its_own_reason_and_names_no_source(cache):
+    """Nothing was tried: "EUR-Lex unreachable", or any other source, would be
+    an outage that never happened."""
+    outcome = check(unsigned(), cache=cache, now=DAY1, offline=True)
+
+    for status in outcome.acts:
+        assert (status.source, status.tried, status.failure) == ("unavailable", None, "offline")
+        assert status.reason == law_checker.OFFLINE
+        assert "unreachable" not in status.reason
+
+
+def test_the_report_says_why_an_act_was_not_verified(cache):
+    """report.py printed the error alone, or nothing a reader could act on."""
+    answers = recorded(**{CELLAR_GDPR: page(GDPR_PAGE.replace('id="art_32"', 'id="art_99"'))})
+    outcome = check(unsigned(), cache=cache, now=DAY1, client=services(answers))
+
+    text = report.to_markdown(unsigned(), law=outcome)
+
+    assert (f"{GDPR.name}: no text available, cited without a hash "
+            "(Cellar answered without the text cited: ") in text

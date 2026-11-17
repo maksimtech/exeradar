@@ -98,7 +98,17 @@ CONSUMER_CODE = Act(
 
 
 class LawFetchError(Exception):
-    """The source could not be reached, or its page did not contain the articles."""
+    """The source could not be reached, or its page did not contain the articles.
+
+    `source` is the source tried ("Cellar", "EUR-Lex", "Normattiva", or "Cellar
+    and EUR-Lex" when the fallback failed too), and `reached` says it answered
+    with a page that lacked the text: a report must not call that "unreachable".
+    """
+
+    def __init__(self, message: str, *, source: str | None = None, reached: bool = False):
+        super().__init__(message)
+        self.source = source
+        self.reached = reached
 
 
 def text_sha256(text: str) -> str:
@@ -555,10 +565,11 @@ def _parse_annex(root: _Element, unit: str) -> dict[str, str]:
     return texts
 
 
-def parse_articles(html: str, articles: tuple[str, ...]) -> dict[str, str]:
+def parse_articles(html: str, articles: tuple[str, ...], source: str | None = None) -> dict[str, str]:
     """
     Extract articles from an EUR-Lex page (Official Journal or consolidated
-    layout) or a Normattiva article page.
+    layout) or a Normattiva article page; `source` is who served it, for the
+    error message.
 
     Returns:
         Text by reference, for each article and each of its paragraphs and
@@ -572,12 +583,15 @@ def parse_articles(html: str, articles: tuple[str, ...]) -> dict[str, str]:
     builder.close()
     by_id = {e.attrs["id"]: e for e in _elements(builder.root) if e.tag == "div" and "id" in e.attrs}
 
+    # Not "the EUR-Lex page" whoever served it: the text comes from Cellar first,
+    # and Normattiva's pages go through here too
+    page = f"the {source} page" if source else "the page"
     texts: dict[str, str] = {}
     for number in articles:
         if _ANNEX_UNIT.match(number):
             parsed = _parse_annex(builder.root, number)
             if not parsed.get(number):
-                raise LawFetchError(f"{number} not found in the page")
+                raise LawFetchError(f"{number} not found in {page}", source=source, reached=True)
             texts.update(parsed)
             continue
         article = by_id.get(f"art_{number}")
@@ -589,7 +603,7 @@ def parse_articles(html: str, articles: tuple[str, ...]) -> dict[str, str]:
                 or _parse_consolidated_article(builder.root, number)
             )
         if not parsed.get(number):
-            raise LawFetchError(f"Article {number} not found in the EUR-Lex page")
+            raise LawFetchError(f"Article {number} not found in {page}", source=source, reached=True)
         texts.update(parsed)
     return texts
 
@@ -624,7 +638,7 @@ FETCH_DEADLINE = 120.0
 
 def _past(deadline: float, source: str) -> None:
     if time.monotonic() > deadline:
-        raise LawFetchError(f"{source} took more than {FETCH_DEADLINE:g} s")
+        raise LawFetchError(f"{source} took more than {FETCH_DEADLINE:g} s", source=source)
 
 
 def _get_over_https(
@@ -657,8 +671,11 @@ def _get_over_https(
         # raw_host: decoding the host is what raises on one like "xn--"
         if target.raw_host != expected or target.port not in (None, 443):
             host = target.raw_host.decode("ascii", "replace") + (f":{target.port}" if target.port else "")
-            raise LawFetchError(f"{source} redirected to {host}, not to {expected.decode('ascii')}: not followed")
-    raise LawFetchError(f"{source} redirected more than {MAX_REDIRECTS} times")
+            raise LawFetchError(
+                f"{source} redirected to {host}, not to {expected.decode('ascii')}: not followed",
+                source=source,
+            )
+    raise LawFetchError(f"{source} redirected more than {MAX_REDIRECTS} times", source=source)
 
 
 def _read_capped(response: httpx.Response, source: str, deadline: float) -> str:
@@ -666,12 +683,12 @@ def _read_capped(response: httpx.Response, source: str, deadline: float) -> str:
     too_large = f"{source} sent more than {MAX_RESPONSE_BYTES} bytes"
     declared = response.headers.get("Content-Length", "")
     if declared.isdigit() and int(declared) > MAX_RESPONSE_BYTES:
-        raise LawFetchError(too_large)
+        raise LawFetchError(too_large, source=source)
     body = bytearray()
     for chunk in response.iter_bytes():
         body += chunk
         if len(body) > MAX_RESPONSE_BYTES:
-            raise LawFetchError(too_large)
+            raise LawFetchError(too_large, source=source)
         _past(deadline, source)
     # As Response.text decodes: the charset declared, else the client's default
     return body.decode(response.encoding or "utf-8", errors="replace")
@@ -682,7 +699,7 @@ def _download(client: httpx.Client, url: str, headers: dict[str, str], source: s
     response = _get_over_https(client, url, headers, source, deadline)
     try:
         if response.status_code != 200:
-            raise LawFetchError(f"{source} answered HTTP {response.status_code}")
+            raise LawFetchError(f"{source} answered HTTP {response.status_code}", source=source)
         return _read_capped(response, source, deadline)
     finally:
         response.close()
@@ -708,7 +725,7 @@ def fetch_html(
     # httpx.InvalidURL, or idna.core.IDNAError (a ValueError) for a host such
     # as "xn--", and either one used to skip the EUR-Lex fallback and the cache.
     except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
-        raise LawFetchError(f"{source} unreachable: {e}") from e
+        raise LawFetchError(f"{source} unreachable: {e}", source=source) from e
 
 
 def fetch_act_html(
@@ -755,7 +772,9 @@ def _fetch_act_page(
             )
             return page, "EUR-Lex"
         except LawFetchError as page_failed:
-            raise LawFetchError(f"{cellar_failed}; and {page_failed}") from page_failed
+            raise LawFetchError(
+                f"{cellar_failed}; and {page_failed}", source="Cellar and EUR-Lex"
+            ) from page_failed
 
 
 def fetch_provisions(
@@ -787,11 +806,11 @@ def fetch_provisions_from(
         texts: dict[str, str] = {}
         for article in articles:
             html = fetch_html(NORMATTIVA_URL.format(urn=act.celex, article=article), client=client)
-            texts.update(parse_articles(html, (article,)))
+            texts.update(parse_articles(html, (article,), "Normattiva"))
         source = "Normattiva"
     else:
         html, source = _fetch_act_page(act, lang, client=client)
-        texts = parse_articles(html, articles)
+        texts = parse_articles(html, articles, source)
     fetched_at = utc_stamp(now or datetime.now(UTC))
     return {
         ref: Provision.from_text(ref, text, fetched_at, act.celex)

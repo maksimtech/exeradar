@@ -281,10 +281,15 @@ def _law_remarks(law: LawCheckResult) -> list[str]:
     """
     remarks = []
     for status in law.acts:
+        # Which source was tried and whether it was unreachable or answered
+        # without the text cited, then the error itself when it says more
+        why = status.reason or ""
+        if status.error and status.error != why:
+            why = f"{why}: {status.error}"
         if status.source == "cache":
-            remarks.append(f"{status.act.name}: cited from the local cache ({status.error})")
+            remarks.append(f"{status.act.name}: cited from the local cache ({why})")
         elif status.source == "unavailable":
-            remarks.append(f"{status.act.name}: no text available, cited without a hash ({status.error})")
+            remarks.append(f"{status.act.name}: no text available, cited without a hash ({why})")
     remarks += [
         f"{provision}: the text changed since the last run (previous SHA-256 {previous})"
         for provision, previous in law.changed.items()
