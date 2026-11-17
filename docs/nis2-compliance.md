@@ -1,6 +1,13 @@
 # ExeRadar: risposte alle sette domande NIS2 sul software
 
-Revisione 1 · 2026-10-11 · vale per il ramo `main` e per le release successive alla 2026.43
+Revisione 2 · 2026-11-17 · vale per il ramo `main` e per le release successive alla 2026.45
+
+Cosa è cambiato dalla revisione 1 (2026-10-11), sempre al punto 5, in tre
+aggiornamenti: il 2026-10-13, le regole del ramo `main` impongono la pull request a ogni
+modifica, senza eccezioni per il manutentore; il 2026-10-24, Docker Scout analizza anche
+ogni nuova immagine pubblicata; il 2026-11-02, Trivy analizza anche l'immagine costruita
+da ogni pull request, prima che venga unita, al posto dello strumento che lo faceva
+prima e che è stato ritirato.
 
 Questo documento risponde alle domande che un cliente soggetto alla direttiva NIS2
 (UE 2022/2555, recepita in Italia con il d.lgs. 138/2024) può porre a un fornitore di
@@ -79,7 +86,7 @@ notifica ai clienti, procedura di rollback. In sintesi:
   carico, anche se la correzione non è ancora pronta;
 - le vulnerabilità accettate, con motivazione e data di revisione, sono in
   `SECURITY-EXCEPTIONS.toml`;
-- ogni versione ha un tag Docker dedicato (es. `maksimtech/exeradar:v2026.43`) e un
+- ogni versione ha un tag Docker dedicato (es. `maksimtech/exeradar:v2026.45`) e un
   digest SHA256 immutabile; il rollback consiste nel tornare a quel tag o a quel
   digest.
 
