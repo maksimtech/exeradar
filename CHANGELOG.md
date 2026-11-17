@@ -65,6 +65,11 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A redirect httpx cannot follow is a fetch failure.** Only `httpx.HTTPError` was one: a 303 to
+  `http://xn--/DOC_1` raises `idna.core.IDNAError`, a `ValueError`, which skipped the EUR-Lex
+  fallback and the cache and ended the law check. `httpx.InvalidURL` and `ValueError` are now fetch
+  failures too. Ported from mailradar #103; `tests/test_law_replayed.py`, on Cellar's recorded 303.
+
 - **A cache that cannot be written no longer hides a change in the law.** The comparison with the
   cached text was made by the save: with `law_cache.json` read-only (or the disk full), a provision
   whose wording had changed was cited with no warning, and an unchanged one was dated to the day of

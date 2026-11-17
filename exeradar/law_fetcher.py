@@ -645,7 +645,10 @@ def fetch_html(
                 response = _get_over_https(own_client, url, headers, source)
         else:
             response = _get_over_https(client, url, headers, source)
-    except httpx.HTTPError as e:
+    # Not only httpx.HTTPError: a Location httpx cannot follow raises
+    # httpx.InvalidURL, or idna.core.IDNAError (a ValueError) for a host such
+    # as "xn--", and either one used to skip the EUR-Lex fallback and the cache.
+    except (httpx.HTTPError, httpx.InvalidURL, ValueError) as e:
         raise LawFetchError(f"{source} unreachable: {e}") from e
     if response.status_code != 200:
         raise LawFetchError(f"{source} answered HTTP {response.status_code}")
