@@ -65,6 +65,12 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A deeply nested `law_cache.json` no longer drops every citation.** `json.loads` raises
+  `RecursionError` on it, which is neither `OSError` nor `ValueError`, so it escaped
+  `LawCache.load`, ended the law check, and `analyze` printed "provisions not cited: maximum recursion
+  depth exceeded" with no provision at all. The file is now read as an empty cache, and the provisions
+  are cited without a hash. Ported from mailradar #103; `tests/test_law_cache.py`.
+
 - **Security Posture gives no verdict on a Docker Scout scan that failed.** Its `workflow_run` trigger
   had no condition on the scan's outcome. On 2026-11-16 Docker Scout failed on main before scanning, on
   a 403 while downloading its own binary (run 43925337119), and the gate ran on it anyway and went green
