@@ -65,6 +65,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **A cache that cannot be written no longer hides a change in the law.** The comparison with the
+  cached text was made by the save: with `law_cache.json` read-only (or the disk full), a provision
+  whose wording had changed was cited with no warning, and an unchanged one was dated to the day of
+  the run instead of its first download. `law_cache.merge` now makes the comparison before the save,
+  and its answer stands whether the save succeeds or not. Ported from mailradar #103;
+  `tests/test_law_checker.py`.
+
 - **A bare "Allegato I" no longer mixes Part I and Part II.** Both parts of the CRA's Annex I are
   numbered from (1), and a unit with no part gave each point the annex's name alone: "Allegato I(1)"
   was Part II(1) written over Part I(1), and "Allegato I(2)" was Part II(2) beside "Allegato I(2)(a)"

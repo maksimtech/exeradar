@@ -35,6 +35,7 @@ are the legal report and are Italian, like the other four Radars.
 """
 from __future__ import annotations
 
+import contextlib
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,7 +43,7 @@ from datetime import UTC, datetime
 import httpx
 
 from exeradar import law_fetcher
-from exeradar.law_cache import Key, LawCache
+from exeradar.law_cache import Key, LawCache, merge
 from exeradar.law_fetcher import CRA, DLGS_138_2024, GDPR, Act, LawFetchError, Provision
 from exeradar.models import ExeResult, Finding, SignatureState
 
@@ -408,14 +409,14 @@ def check(
         else:
             fresh.update({p.key: p for p in by_article.values()})
 
-    changed: dict[Key, str] = {}
-    try:
-        if fresh:
-            provisions, changed = cache.update(fresh, checked_at=law_fetcher.utc_stamp(now))
-        else:
-            provisions = cache.load()
-    except OSError:
-        provisions = {**cache.load(), **fresh}   # the text just downloaded can still be cited
+    # Merged here, not by the save: a cache that cannot be written (read-only,
+    # disk full) must not hide a change in the law, nor date an unchanged
+    # wording to today.
+    provisions, changed = merge(cache.load(), fresh)
+    if fresh:
+        # Unsaved, the text just downloaded can still be cited
+        with contextlib.suppress(OSError):
+            cache.update(fresh, checked_at=law_fetcher.utc_stamp(now))
 
     statuses = []
     for act in acts:

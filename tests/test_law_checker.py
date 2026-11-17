@@ -453,6 +453,60 @@ def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypat
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]
 
 
+@pytest.fixture
+def read_only_cache(cache):
+    """Call it after a first check: it makes `cache` read-only, the file (what
+    stops os.replace on Windows) and its folder (what stops it on POSIX)."""
+    import os
+    import stat
+
+    def freeze():
+        cache.path.chmod(stat.S_IREAD)
+        cache.path.parent.chmod(stat.S_IREAD | stat.S_IEXEC)
+        try:
+            cache.update({}, checked_at="2026-10-01T09:30:00Z")
+        except OSError:
+            return
+        pytest.skip("this user can write a read-only file (root?)")
+
+    yield freeze
+    os.chmod(cache.path.parent, stat.S_IRWXU)
+    if cache.path.exists():
+        os.chmod(cache.path, stat.S_IREAD | stat.S_IWRITE)
+
+
+LATER = datetime(2026, 10, 1, 9, 30, tzinfo=UTC)
+
+
+def test_a_changed_text_is_reported_when_the_cache_cannot_be_written(cache, read_only_cache, monkeypatch):
+    """The change used to be computed only by a successful save: with the cache
+    read-only, a provision whose text changed was cited with no warning."""
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch())
+    first = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
+    read_only_cache()
+
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch(" amended"))
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=LATER)
+
+    assert outcome.changed == {f"{CRA.name} {PART_I}(2)(j)": first.citations[0].sha256}
+    assert outcome.citations[0].sha256 != first.citations[0].sha256
+    assert outcome.citations[0].version_date == "2026-10-01"
+
+
+def test_an_unchanged_text_keeps_its_version_date_when_the_cache_cannot_be_written(
+    cache, read_only_cache, online
+):
+    """The date of a wording is its first download, saved or not: it used to
+    be dated to the day of the run."""
+    check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
+    read_only_cache()
+
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=LATER)
+
+    assert outcome.changed == {}
+    assert outcome.citations[0].version_date == "2026-09-21"
+
+
 def test_offline_cites_from_the_cache_the_hashes_an_online_run_stored(cache, network):
     """The module cites the cached copy when there is no network, and offline by
     choice is the same: nothing downloaded, the hashes and dates read from the cache.
