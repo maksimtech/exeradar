@@ -36,6 +36,7 @@ are the legal report and are Italian, like the other four Radars.
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -137,8 +138,14 @@ ADDRESSES_WITHOUT_NETWORK_NOTE = (
 # network", and no packet is routed to it. Code.exe (VS Code 1.105, measured
 # 2026-10-09) keeps `0.0.10.0`, `0.0.100.0`, `0.1.0.0` in a resource table beside
 # `0.0.10.4425`, and was accused over them.
-_THIS_NETWORK = "0."
-_LOOPBACK = "127."
+_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
+# Nor is an address no single host answers to. 255.255.255.255 is the limited
+# broadcast (RFC 919, RFC 6890), and also INADDR_NONE, what inet_addr returns
+# for a string it cannot read: HP's DeviceSetupLauncher.exe (measured
+# 2026-11-17) carried it as its one dotted quad and was cited against the CRA
+# for it. 224.0.0.0/4 is multicast (RFC 5771): 224.0.0.251 is mDNS and
+# 239.255.255.250 SSDP, the discovery of every printer and scanner on a LAN.
+_LIMITED_BROADCAST = ipaddress.IPv4Address("255.255.255.255")
 
 # Addresses named in the evidence of one finding before the rest are counted.
 # node.exe carried 191 and the evidence ran to nine lines of console; the full
@@ -181,8 +188,19 @@ def _expiry(value: str | None) -> datetime | None:
         return None
 
 
-def _is_local(address: str) -> bool:
-    return address.startswith((_THIS_NETWORK, _LOOPBACK))
+def _not_an_endpoint(address: str) -> bool:
+    """Whether a dotted quad names no host a program could be calling: this
+    network, the loopback, the limited broadcast or a multicast group.
+
+    The octets are read as strings.py reads them, four decimal numbers:
+    ipaddress refuses "2.07.1.23", which strings.py accepts as a quad (a driver
+    version), and that refusal would have decided nothing about the address.
+    """
+    try:
+        ip = ipaddress.IPv4Address(bytes(int(octet) for octet in address.split(".")))
+    except ValueError:
+        return False
+    return ip in _THIS_NETWORK or ip.is_loopback or ip.is_multicast or ip == _LIMITED_BROADCAST
 
 
 def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, list[str]]:
@@ -236,7 +254,7 @@ def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, 
     # finding that fires on every driver installer is one the reader learns to
     # skip. The addresses remain in the report as facts; see
     # ADDRESSES_WITHOUT_NETWORK_NOTE for what is said instead.
-    addresses = [ip for ip in result.strings.ips if not _is_local(ip)]
+    addresses = [ip for ip in result.strings.ips if not _not_an_endpoint(ip)]
     if addresses and reaches_the_network(result):
         found["hardcoded_ip"] = addresses
 
@@ -314,7 +332,7 @@ def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
         notes.append(GDPR_SCOPE_NOTE)
     if "hardcoded_ip" in found:
         notes.append(HARDCODED_IP_NOTE)
-    elif any(not _is_local(ip) for ip in result.strings.ips):
+    elif any(not _not_an_endpoint(ip) for ip in result.strings.ips):
         # Addresses were seen and deliberately not raised. Saying nothing would
         # be indistinguishable from not having looked.
         notes.append(ADDRESSES_WITHOUT_NETWORK_NOTE)

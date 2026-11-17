@@ -65,6 +65,15 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **`hardcoded_ip` is not raised over the broadcast address or a multicast group.** HP's
+  `DeviceSetupLauncher.exe` (HP Scan) imports WS2_32 and carries one dotted quad, `255.255.255.255`:
+  the limited broadcast, which is also `INADDR_NONE`. It was raised as a hardcoded address and cited
+  against CRA Annex I, Part I(2)(j). Only `0.` and `127.` prefixes were left out, by string. The
+  addresses are now read with `ipaddress`, as the four decimal octets `strings.py` accepts, and
+  0.0.0.0/8, 127.0.0.0/8, 255.255.255.255 and 224.0.0.0/4 (mDNS's 224.0.0.251, SSDP's
+  239.255.255.250) are left out of the evidence and of the note about a withheld finding alike; they
+  are still listed among the strings. `tests/test_law_checker.py`.
+
 - **"Verified" is decided per cited reference, and the report says where each verified text came
   from.** An act was verified when its download succeeded and the article or annex part was found.
   A point the parser missed — `Allegato I, Parte I(2)(f)` in a part that parsed — fell back to the
