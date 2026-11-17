@@ -51,6 +51,12 @@ no version in this file has ever matched — 40 is not a month, and
   offer" from a mass-mailing account reached it. Releases already published keep the old address;
   the next one carries the alias. `tests/test_package_metadata.py` keeps it that way.
 
+- **`docs/nis2-compliance.md` is revision 2.** Its header still read revision 1 of 2026-10-11, for
+  releases after 2026.43, although section 5 had changed three times since: the branch rules
+  (2026-10-13), Docker Scout on every published image (2026-10-24), Trivy on the pull request's image
+  and Snyk retired (2026-11-02). The header now names revision 2, applies to releases after 2026.45 and
+  lists those changes; the Docker tag example is `v2026.45`.
+
 ### Fixed
 
 - **Security Posture gives no verdict on a Docker Scout scan that failed.** Its `workflow_run` trigger
