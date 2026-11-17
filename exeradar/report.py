@@ -278,13 +278,26 @@ def _law_remarks(law: LawCheckResult) -> list[str]:
 
     A citation from the cache, or without a hash, has to say so: "SHA256: not
     available" alone reads like a defect of the act rather than of the network.
+    A verified one says where its text came from — Cellar, the EUR-Lex fallback
+    or Normattiva — since otherwise it reads the same as a cached one.
     """
     remarks = []
     for status in law.acts:
+        act = status.act
+        if status.source == "verified":
+            remarks.append(
+                f"{act.name}: verified against {status.origin or act.source} ({act.id_label} {act.celex})"
+            )
+            continue
+        # Which source was tried and whether it was unreachable or answered
+        # without the text cited, then the error itself when it says more
+        why = status.reason or ""
+        if status.error and status.error != why:
+            why = f"{why}: {status.error}"
         if status.source == "cache":
-            remarks.append(f"{status.act.name}: cited from the local cache ({status.error})")
+            remarks.append(f"{status.act.name}: cited from the local cache ({why})")
         elif status.source == "unavailable":
-            remarks.append(f"{status.act.name}: no text available, cited without a hash ({status.error})")
+            remarks.append(f"{status.act.name}: no text available, cited without a hash ({why})")
     remarks += [
         f"{provision}: the text changed since the last run (previous SHA-256 {previous})"
         for provision, previous in law.changed.items()

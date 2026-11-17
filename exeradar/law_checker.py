@@ -35,6 +35,8 @@ are the legal report and are Italian, like the other four Radars.
 """
 from __future__ import annotations
 
+import contextlib
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -42,7 +44,7 @@ from datetime import UTC, datetime
 import httpx
 
 from exeradar import law_fetcher
-from exeradar.law_cache import Key, LawCache
+from exeradar.law_cache import Key, LawCache, merge
 from exeradar.law_fetcher import CRA, DLGS_138_2024, GDPR, Act, LawFetchError, Provision
 from exeradar.models import ExeResult, Finding, SignatureState
 
@@ -136,8 +138,14 @@ ADDRESSES_WITHOUT_NETWORK_NOTE = (
 # network", and no packet is routed to it. Code.exe (VS Code 1.105, measured
 # 2026-10-09) keeps `0.0.10.0`, `0.0.100.0`, `0.1.0.0` in a resource table beside
 # `0.0.10.4425`, and was accused over them.
-_THIS_NETWORK = "0."
-_LOOPBACK = "127."
+_THIS_NETWORK = ipaddress.IPv4Network("0.0.0.0/8")
+# Nor is an address no single host answers to. 255.255.255.255 is the limited
+# broadcast (RFC 919, RFC 6890), and also INADDR_NONE, what inet_addr returns
+# for a string it cannot read: HP's DeviceSetupLauncher.exe (measured
+# 2026-11-17) carried it as its one dotted quad and was cited against the CRA
+# for it. 224.0.0.0/4 is multicast (RFC 5771): 224.0.0.251 is mDNS and
+# 239.255.255.250 SSDP, the discovery of every printer and scanner on a LAN.
+_LIMITED_BROADCAST = ipaddress.IPv4Address("255.255.255.255")
 
 # Addresses named in the evidence of one finding before the rest are counted.
 # node.exe carried 191 and the evidence ran to nine lines of console; the full
@@ -180,8 +188,19 @@ def _expiry(value: str | None) -> datetime | None:
         return None
 
 
-def _is_local(address: str) -> bool:
-    return address.startswith((_THIS_NETWORK, _LOOPBACK))
+def _not_an_endpoint(address: str) -> bool:
+    """Whether a dotted quad names no host a program could be calling: this
+    network, the loopback, the limited broadcast or a multicast group.
+
+    The octets are read as strings.py reads them, four decimal numbers:
+    ipaddress refuses "2.07.1.23", which strings.py accepts as a quad (a driver
+    version), and that refusal would have decided nothing about the address.
+    """
+    try:
+        ip = ipaddress.IPv4Address(bytes(int(octet) for octet in address.split(".")))
+    except ValueError:
+        return False
+    return ip in _THIS_NETWORK or ip.is_loopback or ip.is_multicast or ip == _LIMITED_BROADCAST
 
 
 def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, list[str]]:
@@ -235,7 +254,7 @@ def findings_of(result: ExeResult, *, now: datetime | None = None) -> dict[str, 
     # finding that fires on every driver installer is one the reader learns to
     # skip. The addresses remain in the report as facts; see
     # ADDRESSES_WITHOUT_NETWORK_NOTE for what is said instead.
-    addresses = [ip for ip in result.strings.ips if not _is_local(ip)]
+    addresses = [ip for ip in result.strings.ips if not _not_an_endpoint(ip)]
     if addresses and reaches_the_network(result):
         found["hardcoded_ip"] = addresses
 
@@ -313,7 +332,7 @@ def notes_of(result: ExeResult, *, now: datetime | None = None) -> list[str]:
         notes.append(GDPR_SCOPE_NOTE)
     if "hardcoded_ip" in found:
         notes.append(HARDCODED_IP_NOTE)
-    elif any(not _is_local(ip) for ip in result.strings.ips):
+    elif any(not _not_an_endpoint(ip) for ip in result.strings.ips):
         # Addresses were seen and deliberately not raised. Saying nothing would
         # be indistinguishable from not having looked.
         notes.append(ADDRESSES_WITHOUT_NETWORK_NOTE)
@@ -331,6 +350,12 @@ class Citation:
     version_date: str | None   # YYYY-MM-DD the wording was downloaded
 
 
+# Why an act is not verified when nothing was downloaded by choice. Its own
+# failure, and not "unreachable": no source was tried, and naming one would
+# report an outage that never happened.
+OFFLINE = "offline: the text was not downloaded"
+
+
 @dataclass(frozen=True)
 class ActStatus:
     act: Act
@@ -340,6 +365,23 @@ class ActStatus:
     error: str | None = None
     # Where a verified text came from: "Cellar", "EUR-Lex" (the fallback) or "Normattiva"; None otherwise
     origin: str | None = None
+    # When not verified: the source tried last ("Cellar", "EUR-Lex", "Normattiva", "Cellar and
+    # EUR-Lex"; None if none was, or it is not known), and why it was not used: "unreachable"
+    # (no page), "not_in_text" (a page, without the text cited) or "offline" (nothing tried)
+    tried: str | None = None
+    failure: str | None = None
+
+    @property
+    def reason(self) -> str | None:
+        """Why the act was not verified, as a report says it: "Cellar and EUR-Lex unreachable"."""
+        if self.source == "verified":
+            return None
+        if self.failure == "offline":
+            return OFFLINE
+        tried = self.tried or "the source"
+        if self.failure == "not_in_text":
+            return f"{tried} answered without the text cited"
+        return f"{tried} unreachable"
 
 
 @dataclass
@@ -390,40 +432,61 @@ def check(
     acts = list(dict.fromkeys(act for _, act, _ in cited))
     # Keyed by (celex, article) — the cache's key, not the fetcher's.
     fresh: dict[Key, Provision] = {}
-    errors: dict[Act, str] = {}
+    # None: not downloaded, offline by choice
+    errors: dict[Act, LawFetchError | None] = {}
     origins: dict[Act, str] = {}
     for act in acts:
+        refs = list(dict.fromkeys(ref for _, a, ref in cited if a == act))
         # The units cited — "13" is the article behind "13(1)", "Allegato I,
         # Parte I" the annex part behind its points — plus ALSO_FETCH
         articles = tuple(dict.fromkeys(
-            [ref.split("(")[0] for _, a, ref in cited if a == act] + list(ALSO_FETCH.get(act, ()))
+            [ref.split("(")[0] for ref in refs] + list(ALSO_FETCH.get(act, ()))
         ))
         if offline:
-            errors[act] = "offline: the text was not downloaded"
+            errors[act] = None
             continue
         try:
-            by_article, origins[act] = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
+            by_article, origin = law_fetcher.fetch_provisions_from(act, articles, now=now, client=client)
+            # The unit being there is not enough: each reference cited is
+            # checked against the text just parsed. A point the parser missed
+            # used to fall back to the cache, old hash and date included, under
+            # the "verified" label, or to no hash at all.
+            missing = [ref for ref in refs if ref not in by_article]
+            if missing:
+                raise LawFetchError(
+                    f"{act.name}: {', '.join(missing)} not found in the text from {origin}",
+                    source=origin, reached=True,
+                )
         except LawFetchError as e:
-            errors[act] = str(e)
+            errors[act] = e
         else:
+            origins[act] = origin
             fresh.update({p.key: p for p in by_article.values()})
 
-    changed: dict[Key, str] = {}
-    try:
-        if fresh:
-            provisions, changed = cache.update(fresh, checked_at=law_fetcher.utc_stamp(now))
-        else:
-            provisions = cache.load()
-    except OSError:
-        provisions = {**cache.load(), **fresh}   # the text just downloaded can still be cited
+    # Merged here, not by the save: a cache that cannot be written (read-only,
+    # disk full) must not hide a change in the law, nor date an unchanged
+    # wording to today.
+    provisions, changed = merge(cache.load(), fresh)
+    if fresh:
+        # Unsaved, the text just downloaded can still be cited
+        with contextlib.suppress(OSError):
+            cache.update(fresh, checked_at=law_fetcher.utc_stamp(now))
 
     statuses = []
     for act in acts:
         if act not in errors:
             statuses.append(ActStatus(act, "verified", origin=origins[act]))
         else:
+            error = errors[act]
             cached = any((act.celex, ref) in provisions for _, a, ref in cited if a == act)
-            statuses.append(ActStatus(act, "cache" if cached else "unavailable", errors[act]))
+            source = "cache" if cached else "unavailable"
+            if error is None:
+                statuses.append(ActStatus(act, source, OFFLINE, failure="offline"))
+            else:
+                statuses.append(ActStatus(
+                    act, source, str(error),
+                    tried=error.source, failure="not_in_text" if error.reached else "unreachable",
+                ))
 
     citations = []
     for finding, act, ref in cited:

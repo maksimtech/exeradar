@@ -453,6 +453,60 @@ def test_a_changed_provision_is_reported_with_its_previous_hash(cache, monkeypat
     assert list(outcome.changed) == [f"{CRA.name} {PART_I}(2)(j)"]
 
 
+@pytest.fixture
+def read_only_cache(cache):
+    """Call it after a first check: it makes `cache` read-only, the file (what
+    stops os.replace on Windows) and its folder (what stops it on POSIX)."""
+    import os
+    import stat
+
+    def freeze():
+        cache.path.chmod(stat.S_IREAD)
+        cache.path.parent.chmod(stat.S_IREAD | stat.S_IEXEC)
+        try:
+            cache.update({}, checked_at="2026-10-01T09:30:00Z")
+        except OSError:
+            return
+        pytest.skip("this user can write a read-only file (root?)")
+
+    yield freeze
+    os.chmod(cache.path.parent, stat.S_IRWXU)
+    if cache.path.exists():
+        os.chmod(cache.path, stat.S_IREAD | stat.S_IWRITE)
+
+
+LATER = datetime(2026, 10, 1, 9, 30, tzinfo=UTC)
+
+
+def test_a_changed_text_is_reported_when_the_cache_cannot_be_written(cache, read_only_cache, monkeypatch):
+    """The change used to be computed only by a successful save: with the cache
+    read-only, a provision whose text changed was cited with no warning."""
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch())
+    first = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
+    read_only_cache()
+
+    monkeypatch.setattr(law_fetcher, "fetch_provisions_from", _fake_fetch(" amended"))
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=LATER)
+
+    assert outcome.changed == {f"{CRA.name} {PART_I}(2)(j)": first.citations[0].sha256}
+    assert outcome.citations[0].sha256 != first.citations[0].sha256
+    assert outcome.citations[0].version_date == "2026-10-01"
+
+
+def test_an_unchanged_text_keeps_its_version_date_when_the_cache_cannot_be_written(
+    cache, read_only_cache, online
+):
+    """The date of a wording is its first download, saved or not: it used to
+    be dated to the day of the run."""
+    check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=NOW)
+    read_only_cache()
+
+    outcome = check(result(ips=["203.0.113.7"], imports=SOCKETS), cache=cache, now=LATER)
+
+    assert outcome.changed == {}
+    assert outcome.citations[0].version_date == "2026-09-21"
+
+
 def test_offline_cites_from_the_cache_the_hashes_an_online_run_stored(cache, network):
     """The module cites the cached copy when there is no network, and offline by
     choice is the same: nothing downloaded, the hashes and dates read from the cache.
@@ -561,6 +615,55 @@ def test_this_network_is_treated_as_the_loopback_is():
 
     assert law_checker.ADDRESSES_WITHOUT_NETWORK_NOTE not in notes
     assert law_checker.HARDCODED_IP_NOTE not in notes
+
+
+# --------------------------------------------------------------------------
+# what HP's DeviceSetupLauncher.exe showed on 2026-11-17
+# --------------------------------------------------------------------------
+
+# C:\Program Files\HP\HP Scan\Bin\DeviceSetupLauncher.exe imports WS2_32 and
+# carries one dotted quad, 255.255.255.255: the limited broadcast address
+# (RFC 919, RFC 6890), which is also INADDR_NONE, the value inet_addr returns
+# for a string it cannot read. It was raised as `hardcoded_ip` and cited
+# against CRA Annex I, Part I(2)(j). Multicast groups (224.0.0.0/4, RFC 5771)
+# are no more a host than the broadcast is: 224.0.0.251 is mDNS, which every
+# printer and scanner on a LAN answers.
+NOT_A_HOST = ["255.255.255.255", "224.0.0.251", "239.255.255.250", "224.0.0.1"]
+
+
+def test_the_limited_broadcast_alone_is_not_a_finding():
+    assert findings_of(result(ips=["255.255.255.255"], imports=SOCKETS), now=NOW) == {}
+
+
+@pytest.mark.parametrize("address", NOT_A_HOST)
+def test_broadcast_and_multicast_are_not_endpoints(address):
+    assert findings_of(result(ips=[address], imports=SOCKETS), now=NOW) == {}
+
+
+def test_broadcast_and_multicast_are_treated_as_the_loopback_is():
+    """Not in the evidence, and no note about a withheld finding either."""
+    notes = notes_of(result(ips=NOT_A_HOST, imports=SOCKETS), now=NOW)
+    assert law_checker.HARDCODED_IP_NOTE not in notes
+    assert law_checker.ADDRESSES_WITHOUT_NETWORK_NOTE not in notes
+    assert notes_of(result(ips=NOT_A_HOST), now=NOW) == []
+
+
+def test_the_addresses_beside_them_are_still_a_finding():
+    """The blocks are excluded and nothing next to them: 223.255.255.255 and
+    240.0.0.1 border multicast and are not in it."""
+    edges = ["223.255.255.255", "240.0.0.1", "255.255.255.254"]
+    found = findings_of(result(ips=[*NOT_A_HOST, *edges, *RESOLVERS], imports=SOCKETS), now=NOW)
+
+    assert found == {"hardcoded_ip": [*edges, *RESOLVERS]}
+
+
+def test_a_quad_with_leading_zeros_is_read_as_strings_reads_it():
+    """strings.py accepts "2.07.1.23" (a driver version) as four decimal
+    octets; ipaddress refuses leading zeros. Read the same way, "0.07.1.2" is
+    still this network and "2.07.1.23" still evidence."""
+    found = findings_of(result(ips=["0.07.1.2", "127.0.0.01", "2.07.1.23"], imports=SOCKETS), now=NOW)
+
+    assert found == {"hardcoded_ip": ["2.07.1.23"]}
 
 
 def test_the_evidence_of_a_finding_is_a_line_not_a_wall():

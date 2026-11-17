@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 import pytest
 
 from exeradar import law_fetcher
@@ -78,6 +79,20 @@ def test_the_two_parts_do_not_run_into_each_other(annex):
     assert annex[f"{PART_I}(1)"] != annex[f"{PART_II}(1)"]
     assert annex[f"{PART_II}(1)"] not in annex[PART_I]
     assert annex[f"{PART_I}(2)"] not in annex[PART_II]
+
+
+def test_a_bare_annex_does_not_mix_its_parts(cra, annex):
+    """"Allegato I" without a part numbered the points of both parts as its own:
+    "Allegato I(1)" was Part II(1), written over Part I(1), and "Allegato I(2)"
+    was Part II(2) beside "Allegato I(2)(a)" from Part I. Nothing cites a bare
+    annex today, so it was latent; the points now keep the part they are in."""
+    whole = parse_articles(cra, ("Allegato I",))
+
+    assert not any(ref.startswith("Allegato I(") for ref in whole), sorted(whole)
+    for ref in (f"{PART_I}(1)", f"{PART_I}(2)", f"{PART_I}(2)(f)", f"{PART_II}(1)", f"{PART_II}(2)"):
+        assert whole[ref] == annex[ref], ref
+    assert annex[PART_I] in whole["Allegato I"]
+    assert annex[PART_II] in whole["Allegato I"]
 
 
 def test_the_integrity_requirement_is_where_exeradar_says_it_is(annex):
@@ -194,6 +209,113 @@ def test_the_language_reaches_cellar_as_a_three_letter_code(monkeypatch):
 
     assert seen["Accept-Language"] == "ita"
     assert "xhtml" in seen["Accept"]
+
+
+def _client(handler) -> httpx.Client:
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+@pytest.mark.parametrize("url", [
+    "https://publications.europa.eu/resource/celex/32016R0679",
+    "https://eur-lex.europa.eu/legal-content/IT/TXT/HTML/?uri=CELEX:32016R0679",
+    "https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2024-09-04;138~art24!vig=",
+])
+@pytest.mark.parametrize("location", [
+    "https://example.org/page",
+    "http://example.org/page",
+    "https://normattiva.it/page",                    # not www.normattiva.it
+    "https://publications.europa.eu.example.org/page",
+    "https://eur-lex.europa.eu:8443/page",
+    "https://publications.europa.eu:8443/page",
+])
+def test_a_redirect_off_the_source_host_is_refused(url, location):
+    """A text served from anywhere else would be labelled "verified against
+    Cellar" without being Cellar's: redirects were followed to any host."""
+    seen = []
+
+    def handler(request):
+        seen.append(str(request.url))
+        if len(seen) == 1:
+            return httpx.Response(302, headers={"Location": location})
+        return httpx.Response(200, text="<html>elsewhere</html>")
+
+    with pytest.raises(LawFetchError, match="redirected"):
+        law_fetcher.fetch_html(url, client=_client(handler))
+    assert seen == [url]
+
+
+@pytest.mark.parametrize("url", [
+    "https://eur-lex.europa.eu/legal-content/IT/TXT/HTML/?uri=CELEX:32016R0679",
+    "https://www.normattiva.it/uri-res/N2Ls?urn:nir:stato:decreto.legislativo:2024-09-04;138~art24!vig=",
+])
+def test_a_redirect_on_the_source_host_is_followed(url):
+    """The http:// hop Cellar makes is in test_law_fetch_https.py."""
+    def handler(request):
+        if request.url.path != "/moved":
+            return httpx.Response(302, headers={"Location": f"http://{request.url.host}/moved"})
+        return httpx.Response(200, text="<html>moved</html>")
+
+    assert law_fetcher.fetch_html(url, client=_client(handler)) == "<html>moved</html>"
+
+
+# --------------------------------------------------------------------------
+# size and time
+# --------------------------------------------------------------------------
+# The limits are lowered for these tests, so that they run in a second; set
+# with raising=False, so that the tests fail on the behaviour, not on a name.
+
+CELLAR_GDPR = "https://publications.europa.eu/resource/celex/32016R0679"
+
+
+def _streamed(chunks, pause=0.0):
+    import time
+
+    def body():
+        for chunk in chunks:
+            time.sleep(pause)
+            yield chunk
+
+    return _client(lambda request: httpx.Response(200, content=body()))
+
+
+def test_a_response_larger_than_the_limit_is_refused(monkeypatch):
+    """Nothing bounded a response: a server could fill the memory of the run."""
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    with pytest.raises(LawFetchError, match="Cellar sent more than 65536 bytes"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=_streamed([b"x" * 1024] * 200))
+
+
+def test_a_declared_length_over_the_limit_is_refused_before_reading(monkeypatch):
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    client = _client(lambda request: httpx.Response(200, content=b"x" * (65 * 1024)))
+    with pytest.raises(LawFetchError, match="Cellar sent more than 65536 bytes"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=client)
+
+
+def test_a_response_within_the_limit_is_read_whole(monkeypatch):
+    monkeypatch.setattr(law_fetcher, "MAX_RESPONSE_BYTES", 64 * 1024, raising=False)
+    assert law_fetcher.fetch_html(
+        CELLAR_GDPR, client=_streamed([b"<html>", b"ok", b"</html>"])
+    ) == "<html>ok</html>"
+
+
+def test_a_server_that_drips_is_cut_off_at_the_deadline(monkeypatch):
+    """Each chunk arrives well within the read timeout, so only an overall
+    deadline stops it: 40 chunks, 0.1 s apart, against a 0.5 s deadline."""
+    import time
+
+    monkeypatch.setattr(law_fetcher, "FETCH_DEADLINE", 0.5, raising=False)
+    started = time.monotonic()
+    with pytest.raises(LawFetchError, match="Cellar took more than 0.5 s"):
+        law_fetcher.fetch_html(CELLAR_GDPR, client=_streamed([b"x"] * 40, pause=0.1))
+    assert time.monotonic() - started < 2
+
+
+def test_the_limits_are_sane():
+    """Room for the largest act the Radars cite (the GDPR from Cellar was 823981
+    bytes on 2026-10-11), and an end to a fetch that never finishes."""
+    assert 8 * 1024 * 1024 <= law_fetcher.MAX_RESPONSE_BYTES <= 64 * 1024 * 1024
+    assert 30 <= law_fetcher.FETCH_DEADLINE <= 300
 
 
 def test_normattiva_acts_do_not_go_through_cellar():

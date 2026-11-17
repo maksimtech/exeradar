@@ -65,6 +65,78 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Fixed
 
+- **`hardcoded_ip` is not raised over the broadcast address or a multicast group.** HP's
+  `DeviceSetupLauncher.exe` (HP Scan) imports WS2_32 and carries one dotted quad, `255.255.255.255`:
+  the limited broadcast, which is also `INADDR_NONE`. It was raised as a hardcoded address and cited
+  against CRA Annex I, Part I(2)(j). Only `0.` and `127.` prefixes were left out, by string. The
+  addresses are now read with `ipaddress`, as the four decimal octets `strings.py` accepts, and
+  0.0.0.0/8, 127.0.0.0/8, 255.255.255.255 and 224.0.0.0/4 (mDNS's 224.0.0.251, SSDP's
+  239.255.255.250) are left out of the evidence and of the note about a withheld finding alike; they
+  are still listed among the strings. `tests/test_law_checker.py`.
+
+- **"Verified" is decided per cited reference, and the report says where each verified text came
+  from.** An act was verified when its download succeeded and the article or annex part was found.
+  A point the parser missed — `Allegato I, Parte I(2)(f)` in a part that parsed — fell back to the
+  cache, old SHA-256 and date included, under the verified label, or to "SHA256: not available" with
+  an empty cache; and the report added no remark for a verified act, so a citation checked today
+  read the same as one from the cache. Each reference cited is now looked up in the text just
+  parsed, and a missing one makes the act a fetch failure ("Cellar answered without the text
+  cited"); a verified act gets a note, "verified against Cellar (CELEX 32024R2847)". Ported from
+  mailradar #103; `tests/test_law_replayed.py`.
+
+- **A text not verified says which source was tried, and why.** "Article 24 not found in the EUR-Lex
+  page" was said of Normattiva's page and of Cellar's, and a missing annex part named no source at
+  all. `LawFetchError` now carries `source` and `reached`, and `ActStatus` carries `tried`, `failure`
+  and `reason`, so the report says "Cellar answered without the text cited" or "Cellar and EUR-Lex
+  unreachable" before the error itself; it printed the error alone. Offline is a failure of its own,
+  `"offline"`, whose reason names no source: nothing was tried, and "unreachable" would report an
+  outage that never happened. Ported from mailradar #103; `tests/test_law_replayed.py`.
+
+- **A law text download is bounded in size and time.** Nothing bounded a response: the body was read
+  whole into memory whatever its size, and the 30 s timeout applies to each read, so a server sending
+  a byte every few seconds held `analyze --online` for as long as it liked. The body is now streamed
+  and refused past 32 MiB (the GDPR from Cellar is 0.8 MB), and a fetch, redirects included, ends
+  after 120 s; either is a fetch failure, so the fallback and the cache apply. Ported from mailradar
+  #103; `tests/test_law_fetcher.py`.
+
+- **Redirects stay on the source's host.** They were followed to any host and port: a 303 from
+  Cellar to another host had its page downloaded, hashed, cached and cited as "verified", origin
+  Cellar. A redirect is now followed only to `publications.europa.eu`, `eur-lex.europa.eu` or
+  `www.normattiva.it`, the one of the source asked, on the default port; the `http://` hop Cellar
+  makes is still taken over HTTPS. The hosts `docs/nis2-compliance.md` lists are now the only ones
+  `analyze --online` can reach. Ported from mailradar #103; `tests/test_law_fetcher.py` and
+  `tests/test_law_replayed.py`.
+
+- **A redirect httpx cannot follow is a fetch failure.** Only `httpx.HTTPError` was one: a 303 to
+  `http://xn--/DOC_1` raises `idna.core.IDNAError`, a `ValueError`, which skipped the EUR-Lex
+  fallback and the cache and ended the law check. `httpx.InvalidURL` and `ValueError` are now fetch
+  failures too. Ported from mailradar #103; `tests/test_law_replayed.py`, on Cellar's recorded 303.
+
+- **A cache that cannot be written no longer hides a change in the law.** The comparison with the
+  cached text was made by the save: with `law_cache.json` read-only (or the disk full), a provision
+  whose wording had changed was cited with no warning, and an unchanged one was dated to the day of
+  the run instead of its first download. `law_cache.merge` now makes the comparison before the save,
+  and its answer stands whether the save succeeds or not. Ported from mailradar #103;
+  `tests/test_law_checker.py`.
+
+- **A bare "Allegato I" no longer mixes Part I and Part II.** Both parts of the CRA's Annex I are
+  numbered from (1), and a unit with no part gave each point the annex's name alone: "Allegato I(1)"
+  was Part II(1) written over Part I(1), and "Allegato I(2)" was Part II(2) beside "Allegato I(2)(a)"
+  from Part I. Nothing cites a bare annex, so no report was wrong; the points now keep their part,
+  "Allegato I, Parte I(1)". `tests/test_law_fetcher.py`.
+
+- **Paragraphs inserted by Italian amendments can be cited.** Normattiva numbers them "3-bis",
+  "4-ter", "5-quinquies"; the parser read only digits, so such a paragraph had no reference of its
+  own and its points none either, and one numbered inside the update marks, "((3-bis. ", was not
+  recognised at all. `24(3-bis)` and `24(3-bis)(a)` now exist beside `24(3)`. Ported from mailradar
+  #103; `tests/test_law_italian_sources.py`, on the recorded art. 24 page renumbered.
+
+- **A deeply nested `law_cache.json` no longer drops every citation.** `json.loads` raises
+  `RecursionError` on it, which is neither `OSError` nor `ValueError`, so it escaped
+  `LawCache.load`, ended the law check, and `analyze` printed "provisions not cited: maximum recursion
+  depth exceeded" with no provision at all. The file is now read as an empty cache, and the provisions
+  are cited without a hash. Ported from mailradar #103; `tests/test_law_cache.py`.
+
 - **Security Posture gives no verdict on a Docker Scout scan that failed.** Its `workflow_run` trigger
   had no condition on the scan's outcome. On 2026-11-16 Docker Scout failed on main before scanning, on
   a 403 while downloading its own binary (run 43925337119), and the gate ran on it anyway and went green
