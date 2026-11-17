@@ -68,6 +68,20 @@ def test_the_gate_follows_the_scan(posture):
     assert "Docker Scout CVE Scan" in names_of_workflows()
 
 
+def test_a_failed_scan_triggers_no_verdict(posture):
+    """A scan that failed read nothing, so the alerts are still the previous scan's.
+
+    On 2026-11-16 Docker Scout failed on main before scanning — a 403 while it downloaded its own binary
+    (run 43925337119) — and the gate ran on that `workflow_run` all the same and went green, a verdict that
+    looked fresh and was not. Skipped instead: the failed scan stays red where it can be seen, and the gate
+    speaks again when the scan is rerun and succeeds, or on the next push or schedule.
+    """
+    for job in posture["jobs"].values():
+        condition = " ".join(str(job.get("if", "")).split())
+        assert "github.event.workflow_run.conclusion == 'success'" in condition
+        assert "github.event_name != 'workflow_run'" in condition
+
+
 def test_the_scan_still_runs_by_hand_and_on_its_schedule(scout):
     on = triggers(scout)
     assert "workflow_dispatch" in on and "schedule" in on

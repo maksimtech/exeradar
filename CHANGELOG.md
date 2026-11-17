@@ -51,7 +51,27 @@ no version in this file has ever matched — 40 is not a month, and
   offer" from a mass-mailing account reached it. Releases already published keep the old address;
   the next one carries the alias. `tests/test_package_metadata.py` keeps it that way.
 
+- **`docs/nis2-compliance.md` is revision 2.** Its header still read revision 1 of 2026-10-11, for
+  releases after 2026.43, although section 5 had changed three times since: the branch rules
+  (2026-10-13), Docker Scout on every published image (2026-10-24), Trivy on the pull request's image
+  and Snyk retired (2026-11-02). The header now names revision 2, applies to releases after 2026.45 and
+  lists those changes; the Docker tag example is `v2026.45`.
+
 ### Fixed
+
+- **Security Posture gives no verdict on a Docker Scout scan that failed.** Its `workflow_run` trigger
+  had no condition on the scan's outcome. On 2026-11-16 Docker Scout failed on main before scanning, on
+  a 403 while downloading its own binary (run 43925337119), and the gate ran on it anyway and went green
+  on the previous scan's alerts. The job now runs after a scan only when the scan succeeded, the
+  condition `docker-scout.yml` already puts on the image build; the failed scan stays red, and the gate
+  runs again when the scan is rerun or on the next push or schedule. `tests/test_scan_after_publish.py`
+  holds it.
+
+- **CHANGELOG.md: one `### Added` in 2026.41, and 2026.45 dated the day it shipped.** The 2026.41
+  section carried `### Added` three times, entries written in three sittings; they are now one list,
+  in the order they had. 2026.45 read 2026-10-23, while its tag, its GitHub release and its PyPI upload
+  are all of 2026-10-24. `tests/test_changelog.py` fails on a heading repeated within a section and
+  on a version with two sections.
 
 - **Security Posture reads every page of alerts.** The code scanning API returns at most a hundred
   alerts per call, and the gate read one page of each list. Found in cookieradar on 2026-11-13
@@ -71,7 +91,7 @@ no version in this file has ever matched — 40 is not a month, and
   `security-posture.yml` follows the scan. `docs/nis2-compliance.md` now says so, and `tests/test_scan_after_publish.py`
   holds them together.
 
-## [2026.45] - 2026-10-23
+## [2026.45] - 2026-10-24
 
 ### Security
 
@@ -584,6 +604,80 @@ no version in this file has ever matched — 40 is not a month, and
   modules added in earlier commits were missing from it and one that does not exist
   was in it.
 
+- **FIRST's member directory, as a source.** CVE names a flaw and NVD scores it;
+  FIRST is the body that says who answers for it. `exeradar/first_teams.py` reads
+  `api.first.org/data/v1/teams` — public, no credentials, `"access": "public"` in
+  every response — and returns each team with its verified address and the PGP key
+  to encrypt to. Until now that lookup happened by hand, in a browser, once per
+  disclosure.
+
+  Two rules shape it, and neither is about HTTP.
+
+  **It never chooses between two organisations.** A search for "hewlett" returns
+  Hewlett Packard Enterprise — split off in 2015 — *before* HP Inc., whose name is
+  on a 250 G6. Both are full members, with different addresses and different keys:
+
+  | | | |
+  |---|---|---|
+  | HP Inc. PSRT | `hp-security-alert@hp.com` | `0xF46ECE7D08F8DDD9` |
+  | HPE PSRT | `security-alert@hpe.com` | a different key |
+
+  Taking the first row would send an embargoed finding to the wrong company, so
+  `search` returns every candidate and `resolve` answers only on an exact name,
+  handing the candidates back otherwise. Measured by mutation: a resolver that
+  takes `candidates[0]` fails two of the tests.
+
+  **An empty answer is never an answer about the vendor.** FIRST lists its members;
+  most PSIRTs are not in it. "No member team" comes back as a reason that says so
+  and points at security.txt instead; a timeout raises. The same split
+  `collectors/` keeps between "nothing found" and "could not ask".
+
+  A fingerprint is normalised to forty uppercase hex characters or dropped — the
+  directory prints some of them in spaced groups, and a malformed fingerprint
+  offered as one is worse than none, because it is what a key gets checked
+  against. A row with no address is dropped: it answers nothing.
+
+  Eighteen tests. Seventeen run on trimmed copies of the live payloads; the
+  eighteenth asks the real directory, and only when `EXERADAR_LIVE=1` — a copy
+  cannot notice a renamed field, and `pgp-fingerprint` disappearing would leave
+  every other test green while the letters went out without a key.
+
+  **`exeradar psirt <organisation>`** is the caller. Like `verify` it is meant to
+  be used from a script, so the exit code carries the answer: **0** one team
+  matched exactly, **1** FIRST lists no member team by that name, **2** the
+  directory was unreachable or nothing it returned matches exactly. 1 and 2 are
+  different answers — the first sends a reader to the vendor's security.txt, the
+  second says nobody got an answer — and 2 also covers the case this command
+  exists for, where printing what came back would hand a script the wrong
+  company's address.
+
+  `--key` prints the public key block and nothing else, for
+  `exeradar psirt "HP Inc." --key | gpg --import`. With a fingerprint on record
+  and no key block it exits 1 and prints the fingerprint, so the key can be
+  fetched elsewhere and checked against it.
+
+  Ten more tests. Two of them passed before the command existed — Typer exits 2
+  on an unknown command, so an exit code alone proves nothing — and were tightened
+  until they could only pass against the real thing.
+
+- **A CI gate that refuses.** Every other security workflow reports: `snyk.yml`
+  carries `continue-on-error`, CodeQL and Docker Scout upload SARIF, and
+  SonarCloud decides its quality gate after the job has already succeeded. On
+  2026-09-29 all of them were green while nine high-severity alerts were open.
+  `security-posture.yml` reads what they published and fails when a blocking
+  finding has nobody's name against it; `SECURITY-EXCEPTIONS.toml` records the
+  accepted ones with a reason and a review date. `sonarcloud.yml` now waits for
+  its own quality gate, without which a red gate is a green job.
+
+- **`tests/docker/inspect.sh` prints what the image contains** instead of leaving
+  it to be remembered. It settles the two claims the exceptions record rests on:
+  that the build tooling is gone, and that only `perl-base` is installed —
+  Essential, which dpkg itself depends on, so CVE-2026-82560 is ours to record and
+  not ours to close. `perl`, `perl-modules` and the two `perlapi` entries come
+  back from dpkg-query with no version at all: virtual packages perl-base
+  provides, not installs. That measurement had been borrowed from patchradar's
+  image and is now taken in this one.
+
 ### Removed
 
 - **Four settled entries out of `SECURITY-EXCEPTIONS.toml`, and the fifth kept on
@@ -736,64 +830,6 @@ a version. The Docker entry further down does not and never did: that image is
 republished by dispatching `docker.yml` with the current version, and a tag for
 it would have claimed a package change that had not happened.
 
-### Added
-
-- **FIRST's member directory, as a source.** CVE names a flaw and NVD scores it;
-  FIRST is the body that says who answers for it. `exeradar/first_teams.py` reads
-  `api.first.org/data/v1/teams` — public, no credentials, `"access": "public"` in
-  every response — and returns each team with its verified address and the PGP key
-  to encrypt to. Until now that lookup happened by hand, in a browser, once per
-  disclosure.
-
-  Two rules shape it, and neither is about HTTP.
-
-  **It never chooses between two organisations.** A search for "hewlett" returns
-  Hewlett Packard Enterprise — split off in 2015 — *before* HP Inc., whose name is
-  on a 250 G6. Both are full members, with different addresses and different keys:
-
-  | | | |
-  |---|---|---|
-  | HP Inc. PSRT | `hp-security-alert@hp.com` | `0xF46ECE7D08F8DDD9` |
-  | HPE PSRT | `security-alert@hpe.com` | a different key |
-
-  Taking the first row would send an embargoed finding to the wrong company, so
-  `search` returns every candidate and `resolve` answers only on an exact name,
-  handing the candidates back otherwise. Measured by mutation: a resolver that
-  takes `candidates[0]` fails two of the tests.
-
-  **An empty answer is never an answer about the vendor.** FIRST lists its members;
-  most PSIRTs are not in it. "No member team" comes back as a reason that says so
-  and points at security.txt instead; a timeout raises. The same split
-  `collectors/` keeps between "nothing found" and "could not ask".
-
-  A fingerprint is normalised to forty uppercase hex characters or dropped — the
-  directory prints some of them in spaced groups, and a malformed fingerprint
-  offered as one is worse than none, because it is what a key gets checked
-  against. A row with no address is dropped: it answers nothing.
-
-  Eighteen tests. Seventeen run on trimmed copies of the live payloads; the
-  eighteenth asks the real directory, and only when `EXERADAR_LIVE=1` — a copy
-  cannot notice a renamed field, and `pgp-fingerprint` disappearing would leave
-  every other test green while the letters went out without a key.
-
-  **`exeradar psirt <organisation>`** is the caller. Like `verify` it is meant to
-  be used from a script, so the exit code carries the answer: **0** one team
-  matched exactly, **1** FIRST lists no member team by that name, **2** the
-  directory was unreachable or nothing it returned matches exactly. 1 and 2 are
-  different answers — the first sends a reader to the vendor's security.txt, the
-  second says nobody got an answer — and 2 also covers the case this command
-  exists for, where printing what came back would hand a script the wrong
-  company's address.
-
-  `--key` prints the public key block and nothing else, for
-  `exeradar psirt "HP Inc." --key | gpg --import`. With a fingerprint on record
-  and no key block it exits 1 and prints the fingerprint, so the key can be
-  fetched elsewhere and checked against it.
-
-  Ten more tests. Two of them passed before the command existed — Typer exits 2
-  on an unknown command, so an exit code alone proves nothing — and were tightened
-  until they could only pass against the real thing.
-
 ### Fixed
 
 - **Mutation testing runs again: `also_copy` in `[tool.mutmut]`.** The Saturday
@@ -913,26 +949,6 @@ it would have claimed a package change that had not happened.
   before the scan, with 571 tests passing in the same run. Benchmarks are excluded
   here now, as in three of the other four Radar — a timing measured under coverage
   instrumentation means nothing anyway.
-
-### Added
-
-- **A CI gate that refuses.** Every other security workflow reports: `snyk.yml`
-  carries `continue-on-error`, CodeQL and Docker Scout upload SARIF, and
-  SonarCloud decides its quality gate after the job has already succeeded. On
-  2026-09-29 all of them were green while nine high-severity alerts were open.
-  `security-posture.yml` reads what they published and fails when a blocking
-  finding has nobody's name against it; `SECURITY-EXCEPTIONS.toml` records the
-  accepted ones with a reason and a review date. `sonarcloud.yml` now waits for
-  its own quality gate, without which a red gate is a green job.
-
-- **`tests/docker/inspect.sh` prints what the image contains** instead of leaving
-  it to be remembered. It settles the two claims the exceptions record rests on:
-  that the build tooling is gone, and that only `perl-base` is installed —
-  Essential, which dpkg itself depends on, so CVE-2026-82560 is ours to record and
-  not ours to close. `perl`, `perl-modules` and the two `perlapi` entries come
-  back from dpkg-query with no version at all: virtual packages perl-base
-  provides, not installs. That measurement had been borrowed from patchradar's
-  image and is now taken in this one.
 
 ## [2026.40.1] - 2026-09-26
 
