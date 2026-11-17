@@ -51,6 +51,12 @@ no version in this file has ever matched — 40 is not a month, and
   offer" from a mass-mailing account reached it. Releases already published keep the old address;
   the next one carries the alias. `tests/test_package_metadata.py` keeps it that way.
 
+- **The acl exception is reviewed, and runs to 2027-01-31.** CVE-2026-54369 was due on 2026-11-30,
+  after which Security Posture would have failed on its own. Read again on 2026-11-17: still no-dsa
+  for trixie (Debian bug 1141110), acl 2.4.0 only in forky and sid, nothing in
+  trixie-proposed-updates, and the last point release still 13.7 of 2026-09-12. The new date falls
+  after the 13.8 point release that is due.
+
 - **`docs/nis2-compliance.md` is revision 2.** Its header still read revision 1 of 2026-10-11, for
   releases after 2026.43, although section 5 had changed three times since: the branch rules
   (2026-10-13), Docker Scout on every published image (2026-10-24), Trivy on the pull request's image
