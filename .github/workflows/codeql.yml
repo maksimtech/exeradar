@@ -24,6 +24,7 @@ jobs:
     # that says what it is survives better than the workflow name.
     name: CodeQL
     runs-on: ubuntu-26.04
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@v7
