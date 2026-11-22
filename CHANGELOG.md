@@ -19,7 +19,10 @@ no version in this file has ever matched — 40 is not a month, and
   `3.16-dev` takes its place as the one row with `continue-on-error`, as in apkradar. The matrix jobs
   now report as `Tests (Python 3.11)` … `Tests (Python 3.16-dev)` rather than `test (3.11)`, the
   name every other Radar uses, so main's ruleset can require each stable row by it
-  (`tests/test_codecov_contract.py`).
+  (`tests/test_codecov_contract.py`). On 3.15 every dependency installs from a published wheel;
+  nothing is built from source but ExeRadar itself. `3.16-dev` is green today, unlike in the Radars
+  that depend on cffi: pyyaml, libcst, librt, setproctitle and pydantic-core have no 3.16 wheel yet
+  but build from source, and the suite passes.
 - **Every job has a time limit, so a hung job no longer holds a pull request for six hours.** No job
   but mutmut set `timeout-minutes`, and GitHub's default is 360 minutes; on a required check the pull
   request waited that long. Each limit is about three times the job's longest run in its last 40 (ten
