@@ -61,10 +61,31 @@ def test_the_upload_runs_once_on_a_version_the_matrix_has(workflow):
     )
 
 
-def test_the_upload_is_given_a_token(workflow):
-    """Codecov wants one even for a public repository; without it the upload is
-    rejected, and quietly."""
-    assert "CODECOV_TOKEN" in workflow
+def test_the_upload_proves_which_repository_it_comes_from(workflow):
+    """Codecov wants the upload authenticated even for a public repository; without
+    it the upload is rejected, and quietly.
+
+    It was a `CODECOV_TOKEN` secret until 2026-11-22, and Codecov files an upload
+    under the project the token belongs to, not under the repository that sends it.
+    This repository's token was right, but it had been copied into three other
+    Radars, whose reports landed in this project for at least a month. With OIDC,
+    GitHub itself tells Codecov which repository the job runs in, so no report can
+    land in the wrong project; there is no secret to get wrong. The job needs
+    `id-token: write` for that, and a token in the step would only be ignored next
+    to `use_oidc` and mislead whoever reads it."""
+    import yaml
+
+    jobs = yaml.safe_load(workflow)["jobs"]
+    uploads = [(name, job, step) for name, job in jobs.items() for step in job.get("steps", [])
+               if str(step.get("uses", "")).startswith("codecov/codecov-action@")]
+    assert uploads, "nothing uploads coverage"
+    for name, job, step in uploads:
+        options = step.get("with") or {}
+        assert options.get("use_oidc") is True, f"{name}: the upload does not use OIDC"
+        assert "token" not in options, f"{name}: a token next to use_oidc is ignored"
+        assert (job.get("permissions") or {}).get("id-token") == "write", (
+            f"{name}: without id-token: write the job cannot ask GitHub for the OIDC token")
+    assert "secrets.CODECOV_TOKEN" not in workflow, "the secret is still read somewhere"
 
 
 def test_the_coverage_is_measured_on_this_package(workflow):

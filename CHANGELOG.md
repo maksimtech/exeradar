@@ -35,6 +35,16 @@ no version in this file has ever matched — 40 is not a month, and
   (`tests/test_scout_binary.py`). Sources:
   [docker/scout-action#116](https://github.com/docker/scout-action/issues/116).
 
+- **Coverage is uploaded with OIDC, and no other repository's report lands in this project.** The
+  upload authenticated with a `CODECOV_TOKEN` secret, and Codecov files an upload under the project
+  its token belongs to. This repository's token was right, but the same token sat in the secrets of
+  mailradar, cookieradar and patchradar, so their coverage reports came into this repository's
+  Codecov project for at least a month. The upload now uses OIDC (`use_oidc: true`, `id-token: write`
+  on the test job): GitHub tells Codecov which repository the job runs in, and there is no secret left
+  to copy. The test that required the token now requires OIDC and forbids the secret
+  (`tests/test_codecov_contract.py`). The action, on the moving `@v7`, is pinned to the commit of
+  v7.1.1. Same as maksimtech/mailradar#135, maksimtech/cookieradar#104, maksimtech/patchradar#113.
+
 ### Security
 
 - **CVE-2026-121482 (OpenSSL, CRL distribution points) is accepted until Debian ships a fix.** Docker
