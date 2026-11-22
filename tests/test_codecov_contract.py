@@ -145,3 +145,11 @@ def test_an_experimental_row_cannot_redden_the_suite(workflow):
     rows must still fail the summary job the branch ruleset requires."""
     job = _test_job(workflow)
     assert job.get("continue-on-error") == "${{ matrix.experimental }}"
+
+
+def test_each_row_reports_under_a_name_the_ruleset_can_require(workflow):
+    """The ruleset of main requires the stable rows by name, "Tests (Python
+    3.11)" and so on, as in every Radar. The job was named "test (3.11)", a
+    name no other Radar uses, and a renamed row is a required check that
+    never arrives."""
+    assert _test_job(workflow)["name"] == "Tests (Python ${{ matrix.python-version }})"
