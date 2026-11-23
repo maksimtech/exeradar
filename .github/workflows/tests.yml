@@ -27,7 +27,7 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
         experimental: [false]
         include:
-          # The next Python, ahead of its final: 3.16.0 ships on 2027-10-06
+          # The next Python, ahead of its final: 3.16.0 ships on 2027-10-05
           # (PEP 826). This row may fail without failing the suite; it is
           # here to learn early, it is never a required check, and it
           # becomes a stable row once the classifier does.
