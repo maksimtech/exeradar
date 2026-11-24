@@ -14,6 +14,25 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Changed
 
+- **Renovate asks for the dependency updates, as in apkradar and releaseradar.** Until now exeradar
+  had none: no `.github/dependabot.yml`, only Dependabot's security updates. `.github/renovate.json`
+  is apkradar's:
+  - one batch every Thursday before 6am, and releases taken only once they are 14 days old;
+  - a known vulnerability is updated at once, any day;
+  - minor, patch and digest updates merge on their own once the required checks pass, and a
+    major waits for a person;
+  - the Actions arrive as one pull request, kept pinned to a commit with its full version;
+  - the lower bounds in `pyproject.toml` are raised by hand, and the Python of the image and
+    of the matrix is not Renovate's to move.
+
+  The 14-day rule is also in uv (`[tool.uv] exclude-newer = "14 days"`), because Renovate's wait
+  does not reach the `uv lock --upgrade-package` it runs (apkradar#81). The lock written under it
+  changes no version: every locked release was already older. The required **Renovate gate** job
+  (`tools/renovate_gate.py`) fails a Renovate pull request whose own statuses
+  (`renovate/artifacts`, `renovate/stability-days`) are not green, since GitHub's auto-merge waits
+  only for required checks. Tests: `tests/test_renovate_config.py`, `tests/test_renovate_gate.py`,
+  `tests/test_dependency_age.py`. Alignment to apkradar, step 4 (#49).
+
 - **Every action is pinned to a commit, with its full version.** 44 uses in 14 workflows named moving
   refs (`@v4`, `@v5`, `@v7`, `@v8`, and `@release/v1` in the job that holds the PyPI token). The
   owners of those refs could change what these jobs run without a pull request here. Each is now
