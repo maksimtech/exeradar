@@ -74,6 +74,11 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Security
 
+- **The OpenSSL entries for CVE-2026-84786 (DANE) and CVE-2026-121482 (CRL distribution points) now
+  state OpenSSL's advisory of 2026-11-24.** They said there was no advisory yet. `secadv/20261124.txt`
+  rates both Low and names 3.5.10 as the fix, scheduled for 2026-12-01; until then no release
+  contains it, and Debian still has no fixed package, so the entries stay, with the facts of that
+  day. The CVE-2026-107494 entry already said so (#66).
 - **CVE-2026-107494 (OpenSSL, QUIC) is accepted until Debian ships a fix.** Trivy reports it since
   2026-11-23 against openssl 3.5.9-1~deb13u1 in the image. The fix for CVE-2026-84784 (OpenSSL
   advisory of 2026-09-29, rated Low) was incomplete, and a malicious QUIC peer can still exhaust the
