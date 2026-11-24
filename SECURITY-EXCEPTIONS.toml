@@ -703,3 +703,41 @@ the distribution points only serve to leave their URLs out of the report \
 no VERIFY_CRL_CHECK flag, and exeradar adds none.
 """
 review_by = "2026-12-15"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CVE-2026-107494 (OpenSSL, QUIC; incomplete fix of CVE-2026-84784), reported by
+# Trivy since 2026-11-23 against the base image's openssl 3.5.9-1~deb13u1
+# (maksimtech/apkradar#134). Fixed upstream in 3.5.10, due 2026-12-01. Review by
+# 2026-12-15, with the other OpenSSL entries.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[exception]]
+id = "CVE-2026-107494"
+where = "openssl 3.5.9-1~deb13u1 (libssl3t64, openssl, openssl-provider-legacy), python:3.14-slim-trixie base image"
+why = """
+The fix for CVE-2026-84784 (OpenSSL advisory of 2026-09-29, rated Low, fixed in \
+3.5.9) was incomplete: OpenSSL's QUIC stack still queues a RETIRE_CONNECTION_ID \
+frame for every retransmitted NEW_CONNECTION_ID frame, without limit, so a \
+malicious QUIC peer can exhaust memory. Trivy reports it as high, from \
+CISA-ADP's CVSS 7.5; OpenSSL rates it Low. The fix was committed to the 3.5 \
+branch on 2026-11-22 (openssl/openssl#33544, closed as applied by hand), and \
+OpenSSL's advisory of 2026-11-24 (secadv/20261124.txt) names 3.5.10 as the fixed \
+version, scheduled for release on 2026-12-01: until then no OpenSSL release \
+contains it. Debian marks trixie, trixie-security and sid vulnerable with no \
+fixed package (security-tracker.debian.org, 2026-11-24), so there is nothing to \
+upgrade to. `apt-get upgrade` runs at build time, and the image is rebuilt at \
+every release: the DSA arrives here without anyone chasing it, and this entry \
+then fails the build as unused. No `source`: Docker Scout reads the same \
+package, and the reason below holds whichever scanner reports it.
+
+It is reached only through OpenSSL's QUIC stack, and nothing in this image \
+speaks QUIC. In the image built from main on 2026-11-24 (`--pull --no-cache`, \
+then `ldd` on every ELF file), the system libssl is loaded only by Python's \
+`_ssl`, apt's http method and the `openssl` binary. Python's ssl module exposes \
+no QUIC, client or server. There is no curl or wget, and no Python package that \
+speaks QUIC or HTTP/3 (aioquic, qh3, niquests, h2, pycurl, curl_cffi: none \
+installed). exeradar's own TLS is httpx over TCP, for the law texts, and httpx \
+has no HTTP/3. Authenticode is read by LIEF with its own embedded crypto, not \
+the image's libssl.
+"""
+review_by = "2026-12-15"
