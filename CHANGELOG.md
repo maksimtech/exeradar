@@ -14,6 +14,17 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Changed
 
+- **Every action is pinned to a commit, with its full version.** 44 uses in 14 workflows named moving
+  refs (`@v4`, `@v5`, `@v7`, `@v8`, and `@release/v1` in the job that holds the PyPI token). The
+  owners of those refs could change what these jobs run without a pull request here. Each is now
+  pinned to the commit its ref pointed at on 2026-11-24, with the release beside it: checkout v7.0.1,
+  setup-python v7.1.0, build-push v7.4.0, login v4.8.0, setup-buildx v4.4.1, setup-qemu v4.4.0,
+  upload-artifact v4.6.2, gh-action-pypi-publish v1.14.3. Three were younger than the 14 days a
+  dependency waits here and go to their newest release at least 14 days old, the ones apkradar pins:
+  codeql-action v4.39.3 (its `@v4` moved to v4.39.5 that day), CodSpeed v5.6.3 (`@v5` was v5.8.0)
+  and sonarqube-scan-action v8.4.1 (`@v8` was v8.5.1). Each commit was checked against its tag.
+  `tests/test_actions_pinned.py`, mailradar's, keeps it so.
+
 - **Every job runs on ubuntu-26.04, CodSpeed's too.** The benchmarks stayed on ubuntu-24.04 when the
   other jobs moved on 2026-10-02, because CodSpeed's action failed on 26.04 with "Unsupported system".
   CodSpeed's runner and action v5.5.0 (2026-10-14) support it. `tests/test_runners.py`, as in
