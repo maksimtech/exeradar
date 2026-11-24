@@ -63,6 +63,16 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Security
 
+- **CVE-2026-107494 (OpenSSL, QUIC) is accepted until Debian ships a fix.** Trivy reports it since
+  2026-11-23 against openssl 3.5.9-1~deb13u1 in the image. The fix for CVE-2026-84784 (OpenSSL
+  advisory of 2026-09-29, rated Low) was incomplete, and a malicious QUIC peer can still exhaust the
+  QUIC stack's memory with retransmitted NEW_CONNECTION_ID frames. OpenSSL's advisory of 2026-11-24
+  rates it Low and names 3.5.10 as the fix, scheduled for 2026-12-01; until then no release contains
+  it, and Debian has no fixed package. It is not reachable here, as checked in the image built from
+  main on 2026-11-24: the image's libssl is loaded only by Python's `_ssl`, apt and the `openssl`
+  binary; Python's ssl exposes no QUIC; there is no curl and no QUIC or HTTP/3 library, and httpx has
+  no HTTP/3. The entry has no `source`, since Docker Scout reads the same package. Review by
+  2026-12-15, with the other OpenSSL entries (maksimtech/apkradar#134).
 - **CVE-2026-121482 (OpenSSL, CRL distribution points) is accepted until Debian ships a fix.** Docker
   Scout reported it on 2026-11-22: a certificate with very many CRL distribution points, verified with
   CRL checking enabled, costs CPU time quadratic in their number (openssl/openssl#33546; no advisory
