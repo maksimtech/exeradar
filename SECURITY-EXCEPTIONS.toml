@@ -596,9 +596,10 @@ Authenticode is read by LIEF with its own embedded crypto, not the image's libss
 review_by = "2026-12-15"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CVE-2026-84786 (OpenSSL, DANE; no advisory yet), reported by Docker Scout on
-# main on 2026-11-21 against the trixie libssl3t64 of the base image
-# (maksimtech/apkradar#116). Review on 2026-12-15, with the other OpenSSL entries.
+# CVE-2026-84786 (OpenSSL, DANE), reported by Docker Scout on main on 2026-11-21
+# against the trixie libssl3t64 of the base image (maksimtech/apkradar#116).
+# Fixed upstream in 3.5.10, due 2026-12-01. Review by 2026-12-15, with the other
+# OpenSSL entries.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[exception]]
@@ -607,12 +608,15 @@ source = "Docker Scout"
 where = "openssl 3.5.7-1~deb13u3 (libssl3t64), python:3.14-slim-trixie base image"
 why = """
 A DANE-enabled TLS client may dereference a NULL pointer on an unusual pair of \
-certificate and TLSA records (Debian security tracker). No OpenSSL advisory yet; \
-the fix is openssl/openssl#33634, open on 2026-11-20 and marked for the 3.5 \
-branch. Debian lists trixie and sid as vulnerable, with no fixed version, \
-3.5.9-1~deb13u1 included. Docker Scout reports it as high. `apt-get upgrade` \
-runs at build time, and the image is rebuilt at every release: the DSA arrives \
-here without anyone chasing it, and this entry then fails the build as unused.
+certificate and TLSA records. OpenSSL's advisory of 2026-11-24 \
+(secadv/20261124.txt) rates it Low and names 3.5.10 as the fixed version, \
+scheduled for release on 2026-12-01; the fix, openssl/openssl#33634, was applied \
+to every active branch that morning. Until 3.5.10 no release contains it, and \
+Debian lists trixie and sid as vulnerable, with no fixed version, \
+3.5.9-1~deb13u1 included (2026-11-24). Docker Scout reports it as high. \
+`apt-get upgrade` runs at build time, and the image is rebuilt at every release: \
+the DSA arrives here without anyone chasing it, and this entry then fails the \
+build as unused.
 
 It is reached only by a TLS client that enables DANE (SSL_dane_enable) and checks \
 TLSA records. Python's ssl module exposes no DANE at all, and exeradar reads no \
@@ -674,10 +678,10 @@ matching and fails the build as unused: delete it then.
 review_by = "2026-12-08"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CVE-2026-121482 (OpenSSL, CRL distribution points; no advisory yet), reported
-# by Docker Scout on main on 2026-11-22 against the trixie openssl of the base
-# image (maksimtech/apkradar#124). Review on 2026-12-15, with the other OpenSSL
-# entries.
+# CVE-2026-121482 (OpenSSL, CRL distribution points), reported by Docker Scout on
+# main on 2026-11-22 against the trixie openssl of the base image
+# (maksimtech/apkradar#124). Fixed upstream in 3.5.10, due 2026-12-01. Review by
+# 2026-12-15, with the other OpenSSL entries.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [[exception]]
@@ -688,9 +692,11 @@ why = """
 crl_crldp_check() rebuilds the name of every CRL distribution point of a \
 certificate on each CRL check, so a certificate with very many of them, verified \
 with CRL checking enabled, costs CPU time quadratic in their number \
-(openssl/openssl#33546, merged upstream on 2026-11-18). No OpenSSL advisory or \
-released version yet; Debian lists trixie and sid as vulnerable, \
-3.5.9-1~deb13u1 included, with no fix (`patchradar debian`, 2026-11-21). Docker \
+(openssl/openssl#33546, merged upstream on 2026-11-18). OpenSSL's advisory of \
+2026-11-24 (secadv/20261124.txt) rates it Low and names 3.5.10 as the fixed \
+version, scheduled for release on 2026-12-01; until then no release contains \
+it. Debian lists trixie and sid as vulnerable, 3.5.9-1~deb13u1 included, with \
+no fix (security-tracker.debian.org, 2026-11-24). Docker \
 Scout reports it as high. `apt-get upgrade` runs at build time, and the image is \
 rebuilt at every release: the DSA arrives here without anyone chasing it, and \
 this entry then fails the build as unused.
