@@ -4,7 +4,13 @@ on:
   push:
     tags:
       - 'v*'
+  # From a branch this is a dry run: test and build run, publish and verify are
+  # skipped.
   workflow_dispatch:
+
+# Each job asks for its own; only publish holds the token PyPI trusts
+# (tests/test_publish_contract.py).
+permissions: {}
 
 jobs:
   # The suite, on the code being published. release.sh runs it before it tags,
@@ -37,19 +43,15 @@ jobs:
         # codspeed.yml installs.
         run: pytest tests/ -q --ignore=tests/benchmarks
 
-  build-and-publish:
-    name: Build and publish to PyPI
-    needs: [test]
+  build:
+    name: Build the distributions
+    needs: test
     runs-on: ubuntu-26.04
-    timeout-minutes: 20
-    environment:
-      name: pypi
-      url: https://pypi.org/p/exeradar
-    # Trusted publishing: the token is minted for this job by GitHub and
-    # exchanged with PyPI, so there is no API token in the repository.
+    timeout-minutes: 15
     permissions:
-      id-token: write
-
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -65,43 +67,92 @@ jobs:
       # __init__.py holds nothing but the version string, so this import needs
       # none of the package's dependencies.
       #
-      # Only a tag publishes. The comparison used to apply to tags alone, so a
-      # workflow_dispatch from a branch skipped it and published whatever that
-      # branch held; dispatched from a tag, a rebuild still works.
+      # A branch is not published: publish and verify run on a v* tag only. Here
+      # a branch builds, as the dry run, and says so.
       - name: Check the tag matches the package version
         id: version
         run: |
           VERSION=$(python -c "from exeradar import __version__; print(__version__)")
           if [ "$GITHUB_REF_TYPE" != "tag" ]; then
-            echo "::error::Only a tag publishes; $GITHUB_REF_NAME is a $GITHUB_REF_TYPE"
-            exit 1
-          fi
-          if [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
+            echo "::notice::$GITHUB_REF_NAME is a $GITHUB_REF_TYPE: dry run, nothing is published"
+            echo "Building $VERSION from $GITHUB_REF_NAME as a dry run"
+          elif [ "$GITHUB_REF_NAME" != "v$VERSION" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match package version $VERSION"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
+      # build, hatchling and their dependencies, each pinned with its hashes and
+      # compiled under the 14-day rule; Renovate keeps the file
+      # (tests/test_publish_contract.py, tests/test_renovate_config.py).
       - name: Install build dependencies
-        run: pip install --upgrade build hatchling  # NOSONAR - trusted packages
+        run: pip install --require-hashes -r .github/requirements-build.txt
 
+      # Without isolation: python -m build would fetch an unpinned hatchling into
+      # an environment of its own. The step above installed the pinned one.
       - name: Build package
-        run: python -m build
+        run: python -m build --no-isolation
+
+      - name: Keep the distributions for publish
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The one job PyPI trusts: no checkout, no Python, no command of its own.
+  # Trusted publishing: the token is minted for this job by GitHub and
+  # exchanged with PyPI, so there is no API token in the repository.
+  publish:
+    name: Publish to PyPI
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/exeradar
+    permissions:
+      id-token: write
+    steps:
+      - name: Fetch the distributions build made
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           verify-metadata: false
 
+  verify:
+    name: Check the release installs from PyPI
+    needs: [build, publish]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
       # Nothing proved that what lands on PyPI can be installed: the image builds
       # from the tag's source and never asks the index. The other five Radar check
-      # it here, after the upload, and so does this one now. The install is asked
-      # again until the index has caught up, by install_from_pypi.sh: a single
-      # install right after the upload went red on apkradar 2026.48 and on
-      # releaseradar v2026.2 and v2026.4, each time on a release that was fine.
+      # it, after the upload, and so does this one. The install is asked again
+      # until the index has caught up, by install_from_pypi.sh: a single install
+      # right after the upload went red on apkradar 2026.48 and on releaseradar
+      # v2026.2 and v2026.4, each time on a release that was fine.
       - name: Check the published wheel installs and runs
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
         run: |
           python -m venv "${RUNNER_TEMP}/verify"
           bash .github/scripts/install_from_pypi.sh "${RUNNER_TEMP}/verify" exeradar "$VERSION" 10 30
