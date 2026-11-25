@@ -93,6 +93,24 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Security
 
+- **The job PyPI trusts installs and runs nothing, as in releaseradar.** `publish.yml`'s
+  `build-and-publish` held `id-token: write` while it installed the newest `build` and `hatchling` of
+  that minute, built in an isolated environment that fetched an unpinned hatchling again, and after
+  the upload installed the release with all its runtime dependencies from PyPI. A package
+  compromised like `agent-framework` on 2026-11-18, whose `.pth` file mints OIDC tokens at every
+  Python start-up, could have published a release under this project's name from there
+  (maksimtech/apkradar#135, #65). After `test`, unchanged, the workflow now has three jobs:
+  - `build`, without the token: checks the tag against the version, installs the build tools with
+    `pip install --require-hashes` from `.github/requirements-build.txt` (compiled with
+    `uv pip compile --universal` under the 14-day rule, kept by Renovate's pip-compile manager),
+    builds with `--no-isolation`, and uploads `dist/`;
+  - `publish`, the only job with `id-token: write`: downloads `dist/` and uploads it with
+    `pypa/gh-action-pypi-publish`, with no checkout, no Python and no command of its own;
+  - `verify`, without the token: the install check, unchanged.
+
+  `publish` and `verify` run on a `v*` tag only. A dispatch from a branch used to fail at the tag
+  check; it now tests and builds, as a dry run, and publishes nothing. `tests/test_publish_contract.py`
+  holds the layout, and the header of the requirements file to what Renovate can read.
 - **The OpenSSL entries for CVE-2026-84786 (DANE) and CVE-2026-121482 (CRL distribution points) now
   state OpenSSL's advisory of 2026-11-24.** They said there was no advisory yet. `secadv/20261124.txt`
   rates both Low and names 3.5.10 as the fix, scheduled for 2026-12-01; until then no release
