@@ -124,6 +124,13 @@ no version in this file has ever matched — 40 is not a month, and
   54 without the network they reach (Taskmgr.exe delay-loads IPHLPAPI, MDEServer.exe WS2_32), 56
   without their cryptography, and the hard-coded-address finding without its premise. Both tables are
   read now; `Import.delayed` says which one a DLL came from, and the report marks it "delay-loaded".
+- **A signed PE is no longer reported with an overlay made of its own signature (#83).** The overlay
+  was every byte past the last section, and the PE/COFF specification puts the certificate table
+  there: all 231 signed System32 files measured on 2026-11-27 had nothing else past their sections,
+  and each was reported with an overlay ("overlay 19,808 bytes past the last section"). A signature
+  that was read no longer counts; what is appended after it still does, and a certificate table in
+  which no signature was read stays unexplained, as it is for the strings. The strings still skip
+  everything past the last section.
 
 ### Security
 
