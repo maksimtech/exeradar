@@ -304,19 +304,21 @@ def categorise(dll: str, functions: Iterable[str] = ()) -> frozenset[str]:
     for name in functions:
         if not name:
             continue
-        lowered = name.lower().rstrip("aw")  # CreateProcessW -> createprocess
         exact = name.lower()
+        lowered = exact.rstrip("aw")  # CreateProcessW -> createprocess
         if exact in _FUNCTION_NAMES:
             found.add(_FUNCTION_NAMES[exact])
             continue
         for prefix, category in _FUNCTION_PREFIXES:
-            if category == "registry" and exact.startswith(_NOT_REGISTRY):
+            if not (lowered.startswith(prefix) or exact.startswith(prefix)):
                 continue
-            if category == "process" and exact.startswith(_NOT_PROCESS):
+            # The exceptions, read only once a prefix has matched: tested on every
+            # prefix of every function, they cost categorise 16% (CodSpeed, #86).
+            if (category == "registry" and exact.startswith(_NOT_REGISTRY)) or (
+                    category == "process" and exact.startswith(_NOT_PROCESS)):
                 continue
-            if lowered.startswith(prefix) or exact.startswith(prefix):
-                found.add(category)
-                break
+            found.add(category)
+            break
 
     return frozenset(found)
 
