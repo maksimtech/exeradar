@@ -350,12 +350,19 @@ class PEParser:
             )
             for section in binary.sections
         ]
+        # Both import tables. A DLL named in the delay-load one (/DELAYLOAD) is
+        # loaded at its first call instead of at start, and called all the same:
+        # read from the first table only, Taskmgr.exe delay-loading IPHLPAPI and
+        # MDEServer.exe WS2_32 reached no network, and 54 of 944 System32 files
+        # measured on 2026-11-27 lost the network that way (#81).
         result.imports = [
             Import(
                 dll=_as_text(imported.name),
                 functions=[_function_name(entry) for entry in imported.entries if entry.name or entry.is_ordinal],
+                delayed=delayed,
             )
-            for imported in binary.imports
+            for table, delayed in ((binary.imports, False), (binary.delay_imports, True))
+            for imported in table
         ]
         return result
 
