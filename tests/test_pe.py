@@ -430,3 +430,82 @@ def test_a_file_without_a_version_resource_states_none(pe_path, tmp_path):
 
     assert result.error is None
     assert result.version is None
+
+
+# --------------------------------------------------------------------------
+# the delay-load import table — a second table of imports (#81)
+# --------------------------------------------------------------------------
+
+
+def _pe_with_a_delay_load_import() -> bytes:
+    """A PE32+ written from the PE/COFF specification, holding one thing: a
+    delay-load import table (data directory 13) naming WS2_32.dll, which it asks
+    for `connect` by name and for ordinal 23. No ordinary import table at all.
+
+    One section, `.rdata`, at RVA 0x1000 and file offset 0x200. In it: the
+    `IMAGE_DELAYLOAD_DESCRIPTOR` (attributes 1: the fields are RVAs) and its null
+    terminator, the DLL name, the import name table, the import address table,
+    the hint/name entry and the module handle slot.
+    """
+    import struct
+
+    section = bytearray(0x200)
+    struct.pack_into("<IIIIIIII", section, 0x000, 1, 0x1100, 0x1180, 0x1140, 0x1120, 0, 0, 0)
+    section[0x100:0x10B] = b"WS2_32.dll\0"
+    for table in (0x120, 0x140):                       # name table, address table
+        struct.pack_into("<QQQ", section, table, 0x1160, (1 << 63) | 23, 0)
+    struct.pack_into("<H", section, 0x160, 0)
+    section[0x162:0x16A] = b"connect\0"
+
+    directories = [(0, 0)] * 16
+    directories[13] = (0x1000, 0x40)
+    optional = struct.pack(
+        "<HBBIIIIIQIIHHHHHHIIIIHHQQQQII",
+        0x20B, 14, 0, 0, 0x200, 0, 0x1000, 0x1000, 0x140000000, 0x1000, 0x200,
+        6, 0, 0, 0, 6, 0, 0, 0x2000, 0x200, 0, 3, 0x8160,
+        0x100000, 0x1000, 0x100000, 0x1000, 0, 16,
+    ) + b"".join(struct.pack("<II", *entry) for entry in directories)
+    assert len(optional) == 240
+    coff = struct.pack("<HHIIIHH", 0x8664, 1, 0, 0, 0, len(optional), 0x0022)
+    table = struct.pack("<8sIIIIIIHHI", b".rdata", 0x200, 0x1000, 0x200, 0x200, 0, 0, 0, 0, 0x40000040)
+    dos = bytearray(0x40)
+    dos[0:2] = b"MZ"
+    struct.pack_into("<I", dos, 0x3C, 0x40)
+    headers = bytes(dos) + b"PE\0\0" + coff + optional + table
+    return headers + bytes(0x200 - len(headers)) + bytes(section)
+
+
+@pytest.fixture
+def pe_with_a_delay_load_import(tmp_path) -> Path:
+    target = tmp_path / "delay.exe"
+    target.write_bytes(_pe_with_a_delay_load_import())
+    return target
+
+
+def test_delay_load_imports_are_imports(pe_with_a_delay_load_import):
+    """MSVC's /DELAYLOAD moves a DLL from the import table to the delay-load one:
+    the binary calls it all the same, from its first use. exeradar read only the
+    first table, and on 944 PE files of a Windows 11 System32 on 2026-11-27 that
+    left 54 without the network they reach — Taskmgr.exe delay-loads IPHLPAPI,
+    MDEServer.exe WS2_32 — and 56 without their cryptography."""
+    path = pe_with_a_delay_load_import
+    result = pe.PEParser(path).parse(ExeResult(path=str(path), size=0, sha256=""))
+
+    assert result.error is None
+    assert [(i.dll, i.functions, i.delayed) for i in result.imports] == [("WS2_32.dll", ["connect", "#23"], True)]
+    assert "network" in pe.categorise("WS2_32.dll", result.imports[0].functions)
+
+
+def test_a_delay_loaded_network_dll_reaches_the_network(pe_with_a_delay_load_import):
+    """What the GDPR finding on hard-coded addresses rests on (law_checker)."""
+    from exeradar.law_checker import reaches_the_network
+
+    path = pe_with_a_delay_load_import
+    result = pe.PEParser(path).parse(ExeResult(path=str(path), size=0, sha256=""))
+    assert reaches_the_network(result) is True
+
+
+def test_an_ordinary_import_is_not_called_delay_loaded(pe_path):
+    result = pe.PEParser(pe_path).parse(ExeResult(path=str(pe_path), size=0, sha256=""))
+    assert result.imports
+    assert not any(imported.delayed for imported in result.imports)
