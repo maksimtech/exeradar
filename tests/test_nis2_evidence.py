@@ -224,7 +224,8 @@ def test_the_image_tag_named_is_the_one_docker_yml_pushes(doc):
     document and SECURITY.md gave the same wrong name as the rollback target."""
     image = f"maksimtech/{PACKAGE.name}"
     docker = DOCKER.read_text(encoding="utf-8")
-    assert re.search(r"VERSION=(?:\$\{RAW\}|v\$\{RAW#v\})", docker)
+    # `VERSION="v${RAW#v}"`, checked to be a release tag before it is written (#88)
+    assert re.search(r"VERSION=\"?(?:\$\{RAW\}|v\$\{RAW#v\})", docker)
     pushed = (
         f"{image}:${{{{ steps.version.outputs.VERSION }}}}",
         "format('" + image + ":{0}', steps.version.outputs.VERSION)",

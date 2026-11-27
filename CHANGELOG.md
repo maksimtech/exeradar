@@ -140,6 +140,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Security
 
+- **A version from a tag or the dispatch form is checked to be a release tag before it is written
+  (#88, maksimtech/apkradar#151).** `docker.yml` wrote the dispatch input, `v` added, straight to
+  the step outputs: a newline in it would have added outputs and image tags of its own. It now
+  refuses anything that is not a release tag before writing it, and prints a refused value with
+  `%q`. `publish.yml` already read the version from the package. `tests/test_workflow_inputs.py`,
+  the same in all six Radars, holds it, and the two forms that became code elsewhere (`${{ }}` in a
+  script, a shell variable in a `python -c` string), which never appeared here.
 - **The job PyPI trusts installs and runs nothing, as in releaseradar.** `publish.yml`'s
   `build-and-publish` held `id-token: write` while it installed the newest `build` and `hatchling` of
   that minute, built in an isolated environment that fetched an unpinned hatchling again, and after
