@@ -42,8 +42,16 @@ jobs:
         env:
           RAW: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
         # v-prefixed, as apkradar, mailradar and cookieradar publish. The tag on
-        # the image reads the same as the tag in the repository.
-        run: echo "VERSION=v${RAW#v}" >> "$GITHUB_OUTPUT"
+        # the image reads the same as the tag in the repository. A release tag or
+        # nothing: a newline in a dispatch input would have added outputs and image
+        # tags of its own (#88).
+        run: |
+          VERSION="v${RAW#v}"
+          if [[ ! "$VERSION" =~ ^v[0-9]+(\.[0-9]+)+$ ]]; then
+            printf '::error::not a release tag: %q\n' "$RAW"
+            exit 1
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - name: Set up Docker Buildx
