@@ -588,3 +588,25 @@ def test_the_import_counts_line_up_whatever_the_dll_name_length():
     assert len(rows) == 3
     ends = {len(line.rstrip().split("  registry")[0].rstrip()) for line in rows}
     assert len(ends) == 1, rows
+
+
+def test_a_delay_loaded_dll_is_marked_as_such():
+    """#81: a DLL from the delay-load table is an import like any other, and the
+    report says which table it came from, in both outputs and in the JSON."""
+    result = ExeResult(
+        path="x.exe", size=1, sha256="ab", format="PE", arch="AMD64",
+        imports=[Import(dll="KERNEL32.dll", functions=["a"] * 3),
+                 Import(dll="WS2_32.dll", functions=["connect"], delayed=True)],
+    )
+    console = Console(record=True, width=200)
+    report.to_console(result, console=console)
+    rows = {line.split()[0]: line for line in console.export_text().splitlines() if ".dll" in line}
+    assert "delay-loaded" in rows["WS2_32.dll"] and "network" in rows["WS2_32.dll"]
+    assert "delay-loaded" not in rows["KERNEL32.dll"]
+
+    markdown = [line for line in report.to_markdown(result).splitlines() if ".dll" in line]
+    assert any("WS2_32.dll" in line and "delay-loaded" in line for line in markdown), markdown
+    assert not any("KERNEL32.dll" in line and "delay-loaded" in line for line in markdown)
+
+    assert json.loads(report.to_json(result))["imports"][1]["delayed"] is True
+    assert "network" in json.loads(report.to_json(result))["categories"]

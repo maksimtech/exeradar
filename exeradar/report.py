@@ -218,7 +218,8 @@ def to_markdown(result: ExeResult, tlp_label: Label | None = None,
     for imported in sorted(result.imports, key=lambda i: -len(i.functions))[:_IMPORTS_SHOWN]:
         marks = pe.categorise(imported.dll, imported.functions)
         suffix = f" — {', '.join(sorted(marks))}" if marks else ""
-        lines.append(f"- {_code(imported.dll)} ({len(imported.functions)}){suffix}")
+        delayed = " (delay-loaded)" if imported.delayed else ""
+        lines.append(f"- {_code(imported.dll)} ({len(imported.functions)}){delayed}{suffix}")
     if len(result.imports) > _IMPORTS_SHOWN:
         lines.append(f"- …and {len(result.imports) - _IMPORTS_SHOWN} more")
     lines.append("")
@@ -380,7 +381,8 @@ def to_console(result: ExeResult, console: Console | None = None,
     for imported in shown:
         marks = pe.categorise(imported.dll, imported.functions)
         suffix = f"  [cyan]{', '.join(sorted(marks))}[/cyan]" if marks else ""
-        console.print(f"  {escape(f'{imported.dll:<{width}}')} {len(imported.functions):>4}{suffix}")
+        delayed = "  [dim]delay-loaded[/dim]" if imported.delayed else ""
+        console.print(f"  {escape(f'{imported.dll:<{width}}')} {len(imported.functions):>4}{delayed}{suffix}")
     if len(result.imports) > _IMPORTS_SHOWN:
         console.print(f"  [dim]…and {len(result.imports) - _IMPORTS_SHOWN} more[/dim]")
     console.print()

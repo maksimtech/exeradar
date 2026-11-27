@@ -95,11 +95,38 @@ def test_the_result_says_how_much_was_left_unread(pe_with_text_after_the_section
     count is on the result so the report can say it."""
     result = scanner.scan(pe_with_text_after_the_sections)
 
-    assert result.overlay > 14048
-    assert result.overlay == (
-        pe_with_text_after_the_sections.stat().st_size
-        - pe.overlay_start(pe_with_text_after_the_sections)
-    )
+    # What was appended after the signature, and not the signature itself (#83)
+    assert result.overlay == 16 + len(HOST_IN_OVERLAY) + 16 + len(PATH_IN_OVERLAY) + 16
+
+
+def test_a_signature_is_not_an_overlay(pe_path):
+    """#83: python.exe's 14,048 bytes past the last section are its Authenticode
+    signature, as they are in every one of 231 signed System32 files measured on
+    2026-11-27. The specification puts the certificate table there; nothing was
+    appended, and the report said "overlay 14,048 bytes"."""
+    result = scanner.scan(pe_path)
+
+    assert result.signature.state is scanner.SignatureState.EMBEDDED
+    assert result.overlay == 0
+
+
+def test_a_certificate_table_with_no_signature_read_in_it_is_still_overlay(pe_path, tmp_path):
+    """Where the table lies is a header field anyone can write. With the directory
+    zeroed no signature is read, and the same 14,048 bytes are unexplained again."""
+    import struct
+
+    data = bytearray(pe_path.read_bytes())
+    e_lfanew = struct.unpack_from("<I", data, 0x3C)[0]
+    magic = struct.unpack_from("<H", data, e_lfanew + 24)[0]
+    fixed = 112 if magic == 0x20B else 96
+    struct.pack_into("<II", data, e_lfanew + 24 + fixed + 4 * 8, 0, 0)   # directory 4: certificates
+    target = tmp_path / "unsigned.exe"
+    target.write_bytes(bytes(data))
+
+    result = scanner.scan(target)
+
+    assert result.signature.state is not scanner.SignatureState.EMBEDDED
+    assert result.overlay == 14048
 
 
 def test_a_binary_whose_sections_cannot_be_read_keeps_all_of_it(truncated_pe_path):

@@ -78,6 +78,9 @@ class Section:
 class Import:
     dll: str
     functions: list[str] = field(default_factory=list)
+    # From the delay-load import table (data directory 13, MSVC's /DELAYLOAD):
+    # resolved at the first call rather than at load, called all the same (#81).
+    delayed: bool = False
 
 
 @dataclass(frozen=True)

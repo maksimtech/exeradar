@@ -187,8 +187,15 @@ def scan(path: str | Path) -> ExeResult:
     if result.signature.state is SignatureState.EMBEDDED and start is not None:
         excluded = [(max(begin, start), end) for begin, end in signature.signed_regions(path) if end > start]
     if start is not None:
-        result.overlay = max(size - start, 0)
-        if result.overlay:
+        # What is past the last section and unexplained. A signature that was
+        # read is not appended data: the specification puts the certificate
+        # table there, and every one of 231 signed System32 files measured on
+        # 2026-11-27 had nothing else past its sections, yet each was reported
+        # with an overlay (#83). `excluded` holds exactly the read signature's
+        # bytes past `start`; the strings still skip all of [start, size).
+        signed = sum(end - begin for begin, end in excluded)
+        result.overlay = max(size - start - signed, 0)
+        if size > start:
             excluded.append((start, size))
     # Extracted once and used twice. `classify` sorts the strings into the four
     # buckets a reader wants; the library pass needs the raw runs, because a
