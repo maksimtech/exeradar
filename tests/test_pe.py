@@ -115,6 +115,22 @@ def test_the_registry_api_is_still_recognised_through_kernel32(function):
     assert "registry" in pe.categorise("KERNEL32.dll", [function])
 
 
+@pytest.mark.parametrize("dll", ["ADVAPI32.dll", "KERNEL32.dll", "api-ms-win-downlevel-advapi32-l1-1-0.dll"])
+def test_opening_the_process_token_is_not_opening_a_process(dll):
+    """#84: "openprocess" also caught OpenProcessToken, which opens a process's
+    access token — almost always the binary's own, to adjust its privileges — and
+    touches no other process. On 944 System32 files measured on 2026-11-27, 96 of
+    the 372 marked "process" were marked for that alone. "Register" under "reg"
+    was the same mistake."""
+    assert "process" not in pe.categorise(dll, ["OpenProcessToken"])
+
+
+@pytest.mark.parametrize("dll", ["KERNEL32.dll", "api-ms-win-core-processthreads-l1-1-0.dll"])
+def test_opening_another_process_still_is(dll):
+    assert "process" in pe.categorise(dll, ["OpenProcess"])
+    assert "process" in pe.categorise(dll, ["OpenProcessToken", "OpenProcess"])
+
+
 def test_categories_accumulate():
     result = pe.categorise("ADVAPI32.dll", ["RegOpenKeyExW", "CreateProcessAsUserW"])
     assert result == frozenset({"registry", "process"})
