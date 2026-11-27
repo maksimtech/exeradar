@@ -131,6 +131,12 @@ no version in this file has ever matched — 40 is not a month, and
   that was read no longer counts; what is appended after it still does, and a certificate table in
   which no signature was read stays unexplained, as it is for the strings. The strings still skip
   everything past the last section.
+- **`OpenProcessToken` no longer makes a binary "process" (#84).** The `openprocess` prefix, meant
+  for `OpenProcess`, which opens another process, also took `OpenProcessToken`. That call opens a
+  process's access token, nearly always the binary's own, to read or adjust its privileges, and
+  touches no other process. On 944 System32 files measured on 2026-11-27, 96 of the 372 marked
+  "process" were marked for that alone; now 276 are. It is excluded the way `Register*` is from
+  `reg`, and `OpenProcess` stays "process".
 
 ### Security
 

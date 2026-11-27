@@ -74,6 +74,12 @@ _FUNCTION_PREFIXES: tuple[tuple[str, str], ...] = (
 # have traded a false positive for a false negative.
 _NOT_REGISTRY = "register"
 
+# "OpenProcess" opens a handle to another process; "OpenProcessToken" opens a
+# process's access token — nearly always the binary's own, to read or adjust its
+# privileges — and touches no other process. Under the prefix, 96 of the 372
+# System32 files marked "process" on 2026-11-27 were marked for that alone (#84).
+_NOT_PROCESS = "openprocesstoken"
+
 # Exact matches, for the Berkeley sockets names that carry no prefix.
 _FUNCTION_NAMES: dict[str, str] = {
     "socket": "network",
@@ -298,17 +304,21 @@ def categorise(dll: str, functions: Iterable[str] = ()) -> frozenset[str]:
     for name in functions:
         if not name:
             continue
-        lowered = name.lower().rstrip("aw")  # CreateProcessW -> createprocess
         exact = name.lower()
+        lowered = exact.rstrip("aw")  # CreateProcessW -> createprocess
         if exact in _FUNCTION_NAMES:
             found.add(_FUNCTION_NAMES[exact])
             continue
         for prefix, category in _FUNCTION_PREFIXES:
-            if category == "registry" and exact.startswith(_NOT_REGISTRY):
+            if not (lowered.startswith(prefix) or exact.startswith(prefix)):
                 continue
-            if lowered.startswith(prefix) or exact.startswith(prefix):
-                found.add(category)
-                break
+            # The exceptions, read only once a prefix has matched: tested on every
+            # prefix of every function, they cost categorise 16% (CodSpeed, #86).
+            if (category == "registry" and exact.startswith(_NOT_REGISTRY)) or (
+                    category == "process" and exact.startswith(_NOT_PROCESS)):
+                continue
+            found.add(category)
+            break
 
     return frozenset(found)
 
