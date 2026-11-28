@@ -140,6 +140,13 @@ no version in this file has ever matched — 40 is not a month, and
 
 ### Security
 
+- **One private reporting channel on GitHub, the same in every Radar (#90, maksimtech/apkradar#153).** GitHub's private vulnerability reporting is open on this repository since 2026-11-28, next to
+  <security@maksimtech.com> with its GPG key, and `SECURITY.md` links it
+  (`https://github.com/maksimtech/exeradar/security/advisories/new`).
+  Reports are acknowledged within 7 days, and a vulnerability is disclosed in coordination with the
+  reporter, who is credited in the advisory and the CHANGELOG if they wish.
+  `tests/test_security_policy.py`, the same in all six, holds the two channels, that line, and a
+  report link that names this repository and no other.
 - **A version from a tag or the dispatch form is checked to be a release tag before it is written
   (#88, maksimtech/apkradar#151).** `docker.yml` wrote the dispatch input, `v` added, straight to
   the step outputs: a newline in it would have added outputs and image tags of its own. It now
